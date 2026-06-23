@@ -8,7 +8,7 @@ import 'local_store.dart';
 class ApiClient {
   ApiClient(this.store);
 
-  static const defaultBaseUrl = 'http://10.0.0.2:8003';
+  static const defaultBaseUrl = 'http://69.64.32.23:8073';
 
   final LocalStore store;
 
