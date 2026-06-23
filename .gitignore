@@ -2,8 +2,11 @@
 backend/.venv/
 backend/__pycache__/
 backend/app/**/__pycache__/
+backend/**/__pycache__/
 backend/*.db
 backend/uploads/
+backend/.env
+backend/nohup.out
 
 # Node
 frontend/node_modules/
@@ -26,3 +29,4 @@ mobile/android/local.properties
 Thumbs.db
 .idea/
 .vscode/
+.run/

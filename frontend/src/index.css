@@ -3,25 +3,29 @@
 
 :root {
   --brandt-green: #0a7354;
-  --brandt-green-accent: #339a51;
+  --brandt-green-accent: #0c8160;
+  --brandt-green-soft: #eaf5f0;
   --brandt-blue: #0f486e;
   --dark-forest: #061411;
-  --soft-background: #f4f8f6;
+  --soft-background: #f7f8f7;
   --card-background: #ffffff;
-  --border-soft: #dce7e3;
-  --text-dark: #10231f;
-  --text-muted: #64756f;
-  --brand-gradient: linear-gradient(135deg, #0a7354 0%, #0f486e 100%);
-  --brand-gradient-soft: linear-gradient(135deg, rgba(10, 115, 84, 0.1) 0%, rgba(15, 72, 110, 0.1) 100%);
-  --shadow-soft: 0 18px 60px rgba(6, 20, 17, 0.08);
-  --shadow-lift: 0 26px 80px rgba(6, 20, 17, 0.16);
-  --radius-brand: 8px;
+  --border-soft: #e7eae8;
+  --border-strong: #d6dcd8;
+  --text-dark: #14201c;
+  --text-muted: #687671;
+  --brand-gradient: linear-gradient(180deg, #0c8160 0%, #0a7354 100%);
+  --brand-gradient-soft: linear-gradient(135deg, rgba(10, 115, 84, 0.08) 0%, rgba(15, 72, 110, 0.08) 100%);
+  --shadow-xs: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow-soft: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
+  --shadow-lift: 0 6px 16px rgba(16, 24, 40, 0.08), 0 2px 6px rgba(16, 24, 40, 0.05);
+  --radius-brand: 10px;
   color: var(--text-dark);
   background: var(--soft-background);
   font-family:
     Inter, Manrope, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
   font-synthesis: none;
+  letter-spacing: -0.011em;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -57,24 +61,21 @@ button {
 
 .glass {
   min-width: 0;
-  background: rgba(255, 255, 255, 0.84);
-  border: 1px solid rgba(220, 231, 227, 0.82);
+  background: var(--card-background);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-brand);
   box-shadow: var(--shadow-lift);
-  backdrop-filter: blur(24px);
 }
 
 .panel {
   min-width: 0;
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--card-background);
   border: 1px solid var(--border-soft);
   box-shadow: var(--shadow-soft);
 }
 
 .brand-surface {
-  background:
-    radial-gradient(circle at 18% 18%, rgba(51, 154, 81, 0.18), transparent 28%),
-    radial-gradient(circle at 82% 12%, rgba(15, 72, 110, 0.16), transparent 32%),
-    linear-gradient(180deg, #f8fbfa 0%, var(--soft-background) 100%);
+  background: linear-gradient(180deg, #ffffff 0%, var(--soft-background) 60%);
 }
 
 .brand-gradient {
@@ -90,33 +91,36 @@ button {
   background: var(--card-background);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-brand);
-  box-shadow: var(--shadow-soft);
+  box-shadow: var(--shadow-xs);
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
 }
 
 .brand-card:hover {
-  box-shadow: var(--shadow-lift);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-soft);
 }
 
 .soft-grid {
-  background-image:
-    linear-gradient(rgba(10, 115, 84, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(15, 72, 110, 0.05) 1px, transparent 1px);
-  background-size: 32px 32px;
+  background-image: radial-gradient(rgba(16, 24, 40, 0.045) 1px, transparent 1px);
+  background-size: 22px 22px;
 }
 
 .premium-btn {
   transition:
-    transform 160ms ease,
-    box-shadow 160ms ease,
-    background 160ms ease;
+    box-shadow 150ms ease,
+    background 150ms ease,
+    border-color 150ms ease,
+    filter 150ms ease;
 }
 
 .premium-btn:hover {
-  transform: translateY(-1px);
+  filter: brightness(1.02);
 }
 
 .premium-btn:active {
-  transform: translateY(0) scale(0.99);
+  transform: scale(0.99);
 }
 
 .leaflet-container {
@@ -127,37 +131,37 @@ button {
 }
 
 .brandt-marker {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border-radius: 999px;
   background: var(--brandt-green);
-  border: 3px solid #fff;
-  box-shadow: 0 0 0 8px rgba(10, 115, 84, 0.2), 0 14px 30px rgba(10, 115, 84, 0.24);
+  border: 2.5px solid #fff;
+  box-shadow: 0 0 0 4px rgba(10, 115, 84, 0.16), 0 2px 6px rgba(16, 24, 40, 0.18);
 }
 
 .brandt-marker.reviewed {
   background: var(--brandt-blue);
-  box-shadow: 0 0 0 8px rgba(15, 72, 110, 0.18), 0 14px 30px rgba(15, 72, 110, 0.24);
+  box-shadow: 0 0 0 4px rgba(15, 72, 110, 0.16), 0 2px 6px rgba(16, 24, 40, 0.18);
 }
 
 .brandt-marker.pending {
-  background: #d8a23f;
-  box-shadow: 0 0 0 8px rgba(216, 162, 63, 0.2), 0 14px 30px rgba(216, 162, 63, 0.24);
+  background: #c98a2c;
+  box-shadow: 0 0 0 4px rgba(201, 138, 44, 0.18), 0 2px 6px rgba(16, 24, 40, 0.18);
 }
 
 .brandt-marker.error {
-  background: #a23a35;
-  box-shadow: 0 0 0 8px rgba(162, 58, 53, 0.2), 0 14px 30px rgba(162, 58, 53, 0.24);
+  background: #b4322c;
+  box-shadow: 0 0 0 4px rgba(180, 50, 44, 0.18), 0 2px 6px rgba(16, 24, 40, 0.18);
 }
 
 .leaflet-popup-content-wrapper,
 .leaflet-popup-tip {
-  border-radius: 8px;
-  box-shadow: 0 18px 50px rgba(6, 20, 17, 0.18);
+  border-radius: 10px;
+  box-shadow: var(--shadow-lift);
 }
 
 .skeleton {
-  background: linear-gradient(90deg, #dce7e3 25%, #f8fbfa 37%, #dce7e3 63%);
+  background: linear-gradient(90deg, #eceeed 25%, #f7f8f7 37%, #eceeed 63%);
   background-size: 400% 100%;
   animation: shimmer 1.25s ease infinite;
 }

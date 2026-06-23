@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../core/access.dart';
 import '../core/api_client.dart';
 import '../core/providers.dart';
 import '../widgets/app_widgets.dart';
@@ -17,6 +18,7 @@ class SettingsScreen extends ConsumerStatefulWidget {
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   final apiUrl = TextEditingController();
+  Map<String, dynamic>? _user;
 
   @override
   void initState() {
@@ -25,9 +27,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _load() async {
-    apiUrl.text =
-        await ref.read(storeProvider).setting('api_url') ??
-        ApiClient.defaultBaseUrl;
+    final store = ref.read(storeProvider);
+    final loadedUser = await store.user();
+    apiUrl.text = await store.setting('api_url') ?? ApiClient.defaultBaseUrl;
+    if (mounted) setState(() => _user = loadedUser);
   }
 
   @override
@@ -74,6 +77,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ],
             ),
           ),
+          if (canManageAccess(_user)) ...[
+            const SizedBox(height: 14),
+            PremiumCard(
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.manage_accounts_rounded),
+                title: const Text('Gerenciar acessos'),
+                subtitle: const Text(
+                  'Cadastre usuarios e defina projetos e formularios liberados.',
+                ),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => context.push('/users'),
+              ),
+            ),
+          ],
           const SizedBox(height: 14),
           PremiumCard(
             child: ListTile(

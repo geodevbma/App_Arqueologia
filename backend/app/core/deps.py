@@ -8,6 +8,7 @@ from app.models.entities import ProjectUser, User
 
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+GLOBAL_ACCESS_ROLES = {"admin", "coordinator", "viewer"}
 
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
@@ -22,6 +23,10 @@ def role_name(user: User) -> str:
     return user.role.name if user.role else ""
 
 
+def has_global_access(user: User) -> bool:
+    return role_name(user) in GLOBAL_ACCESS_ROLES
+
+
 def require_roles(*roles: str):
     def guard(user: User = Depends(get_current_user)) -> User:
         if role_name(user) not in roles:
@@ -32,7 +37,7 @@ def require_roles(*roles: str):
 
 
 def ensure_project_access(db: Session, user: User, project_id: str) -> None:
-    if role_name(user) == "admin":
+    if has_global_access(user):
         return
     exists = db.query(ProjectUser).filter_by(project_id=project_id, user_id=user.id).first()
     if not exists:

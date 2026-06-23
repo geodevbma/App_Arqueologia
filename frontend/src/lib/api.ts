@@ -2,7 +2,7 @@ import axios from "axios";
 import { create } from "zustand";
 
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL ?? "http://localhost:8000",
+  baseURL: import.meta.env.VITE_API_URL ?? "/api",
 });
 
 type AuthState = {
@@ -87,6 +87,7 @@ export type FormField = {
 export type DynamicForm = {
   id: string;
   project_id: string;
+  project_ids?: string[];
   name: string;
   description?: string | null;
   status: string;
@@ -172,4 +173,19 @@ export async function getWorkPoints(sectionId: string) {
 
 export function exportUrl(path: string) {
   return `${api.defaults.baseURL}${path}`;
+}
+
+export async function downloadExport(path: string, fallbackName: string) {
+  const { data, headers } = await api.get<Blob>(path, { responseType: "blob" });
+  const disposition = headers["content-disposition"] as string | undefined;
+  const match = disposition?.match(/filename="?([^"]+)"?/);
+  const filename = match?.[1] ?? fallbackName;
+  const url = URL.createObjectURL(data);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }

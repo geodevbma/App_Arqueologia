@@ -46,6 +46,24 @@ class ApiClient {
     await store.saveBootstrap(response.data!);
   }
 
+  Future<List<Map<String, dynamic>>> listUsers() async {
+    final dio = await _dio();
+    final response = await dio.get<List<dynamic>>('/users');
+    return (response.data ?? [])
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .toList();
+  }
+
+  Future<void> createUser(Map<String, dynamic> payload) async {
+    final dio = await _dio();
+    await dio.post<Map<String, dynamic>>('/users', data: payload);
+  }
+
+  Future<void> updateUser(String id, Map<String, dynamic> payload) async {
+    final dio = await _dio();
+    await dio.put<Map<String, dynamic>>('/users/$id', data: payload);
+  }
+
   Future<Map<String, dynamic>> syncPending() async {
     final dio = await _dio();
     final pending = await store.collections(onlyPending: true);

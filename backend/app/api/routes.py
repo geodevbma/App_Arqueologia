@@ -5,10 +5,11 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
+from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import get_settings
-from app.core.deps import ensure_project_access, get_current_user, require_roles, role_name
+from app.core.deps import GLOBAL_ACCESS_ROLES, ensure_project_access, get_current_user, require_roles, role_name
 from app.core.security import create_access_token, hash_password, verify_password
 from app.db.session import get_db
 from app.models.entities import (
@@ -20,6 +21,7 @@ from app.models.entities import (
     FormField,
     FormVersion,
     Project,
+    ProjectForm,
     ProjectUser,
     Role,
     Section,
@@ -54,6 +56,9 @@ from app.services.exports import build_collection_pdf, build_collections_kmz, bu
 
 router = APIRouter()
 
+SYSTEM_MANAGER_ROLES = ("admin", "coordinator")
+MOBILE_COLLECTION_WRITER_ROLES = ("admin", "coordinator", "archaeologist")
+
 
 def get_role(db: Session, role_id: str | None = None, role: str | None = None) -> Role:
     if role_id:
@@ -80,23 +85,37 @@ def audit(db: Session, user: User | None, entity: str, entity_id: str, action: s
 
 
 def visible_project_ids(db: Session, user: User) -> list[str] | None:
-    if role_name(user) == "admin":
+    if role_name(user) in GLOBAL_ACCESS_ROLES:
         return None
     return [row.project_id for row in db.query(ProjectUser).filter_by(user_id=user.id).all()]
 
 
 def visible_form_ids(db: Session, user: User) -> list[str] | None:
-    if role_name(user) == "admin":
+    if role_name(user) in GLOBAL_ACCESS_ROLES:
         return None
     return [row.form_id for row in db.query(UserForm).filter_by(user_id=user.id).all()]
 
 
 def ensure_form_access(db: Session, user: User, form_id: str) -> None:
-    if role_name(user) == "admin":
+    if role_name(user) in GLOBAL_ACCESS_ROLES:
         return
     exists = db.query(UserForm).filter_by(user_id=user.id, form_id=form_id).first()
     if not exists:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acesso ao formulario negado")
+
+
+def ensure_mobile_collection_write(user: User) -> None:
+    if role_name(user) not in MOBILE_COLLECTION_WRITER_ROLES:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Perfil sem permissao para enviar coletas")
+
+
+def ensure_collection_update_access(user: User, collection: Collection) -> None:
+    current_role = role_name(user)
+    if current_role in {"admin", "coordinator"}:
+        return
+    if current_role == "archaeologist" and collection.user_id == user.id:
+        return
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Coleta pertence a outro usuario")
 
 
 def collection_query(db: Session):
@@ -119,10 +138,30 @@ def replace_project_links(db: Session, user: User, project_ids: list[str]) -> No
 
 
 def replace_form_links(db: Session, user: User, form_ids: list[str]) -> None:
-    db.query(UserForm).filter_by(user_id=user.id).delete()
-    for form_id in form_ids:
-        if db.get(Form, form_id):
-            db.add(UserForm(user_id=user.id, form_id=form_id))
+    valid_form_ids = [form_id for form_id in dict.fromkeys(form_ids) if db.get(Form, form_id)]
+    existing_links = {link.form_id: link for link in user.form_links}
+    user.form_links = [
+        existing_links.get(form_id) or UserForm(user_id=user.id, form_id=form_id)
+        for form_id in valid_form_ids
+    ]
+    db.flush()
+
+
+def replace_form_projects(db: Session, form: Form, project_ids: list[str]) -> list[str]:
+    valid = [pid for pid in dict.fromkeys(project_ids) if db.get(Project, pid)]
+    if not valid:
+        raise HTTPException(status_code=422, detail="Informe ao menos um projeto valido para o formulario")
+    db.query(ProjectForm).filter_by(form_id=form.id).delete()
+    for project_id in valid:
+        db.add(ProjectForm(project_id=project_id, form_id=form.id))
+    form.project_id = valid[0]
+    return valid
+
+
+def forms_for_projects(query, project_ids: list[str]):
+    """Restringe uma query de Form aos vinculados (via ProjectForm) a algum dos projetos."""
+    linked = select(ProjectForm.form_id).where(ProjectForm.project_id.in_(project_ids))
+    return query.filter(Form.id.in_(linked))
 
 
 def validate_required_collection_fields(db: Session, payload: CollectionIn) -> None:
@@ -141,35 +180,45 @@ def validate_required_collection_fields(db: Session, payload: CollectionIn) -> N
         "coordinates": [payload.latitude, payload.longitude] if payload.latitude is not None and payload.longitude is not None else None,
     }
     photo_types = {photo.photo_type for photo in payload.photos}
+
+    def is_empty(value: object) -> bool:
+        return value is None or value == "" or value == []
+
     for field in fields:
         if not field.is_required:
             continue
         condition = field.conditional_logic
         if condition:
-            if context.get(condition.get("field")) != condition.get("value"):
+            target = context.get(condition.get("field"))
+            expected = condition.get("value")
+            if condition.get("operator") == "contains":
+                if not (isinstance(target, list) and expected in target):
+                    continue
+            elif target != expected:
                 continue
         if field.field_key == "work_point_id" and not payload.work_point_id and not payload.work_point_other:
             raise HTTPException(status_code=422, detail=f"Campo obrigatorio ausente: {field.label}")
         if field.field_key in {"project_id", "section_id", "collection_date", "coordinates"}:
-            if context.get(field.field_key) in (None, ""):
+            if is_empty(context.get(field.field_key)):
                 raise HTTPException(status_code=422, detail=f"Campo obrigatorio ausente: {field.label}")
             continue
         if field.field_type == "photo":
             if field.field_key not in photo_types:
                 raise HTTPException(status_code=422, detail=f"Foto obrigatoria ausente: {field.label}")
             continue
-        if context.get(field.field_key) in (None, ""):
+        if is_empty(context.get(field.field_key)):
             raise HTTPException(status_code=422, detail=f"Campo obrigatorio ausente: {field.label}")
 
 
 def upsert_collection(db: Session, payload: CollectionIn, user: User, device_id: str | None = None) -> Collection:
+    ensure_mobile_collection_write(user)
     ensure_project_access(db, user, payload.project_id)
     ensure_form_access(db, user, payload.form_id)
     validate_required_collection_fields(db, payload)
-    owner_id = payload.user_id if role_name(user) in {"admin", "coordinator"} and payload.user_id else user.id
     collection = db.query(Collection).filter_by(local_uuid=payload.local_uuid).first()
     now = datetime.utcnow()
     if collection:
+        ensure_collection_update_access(user, collection)
         db.query(CollectionAnswer).filter_by(collection_id=collection.id).delete()
         db.query(CollectionPhoto).filter_by(collection_id=collection.id).delete()
         action = "update_collection_from_mobile"
@@ -177,6 +226,11 @@ def upsert_collection(db: Session, payload: CollectionIn, user: User, device_id:
         collection = Collection(local_uuid=payload.local_uuid, server_uuid=new_id())
         db.add(collection)
         action = "create_collection_from_mobile"
+
+    if role_name(user) in {"admin", "coordinator"}:
+        owner_id = payload.user_id or collection.user_id or user.id
+    else:
+        owner_id = user.id
 
     collection.project_id = payload.project_id
     collection.form_id = payload.form_id
@@ -269,7 +323,7 @@ def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)) ->
 
 
 @router.get("/users", response_model=list[UserOut])
-def list_users(_: User = Depends(require_roles("admin")), db: Session = Depends(get_db)) -> list[User]:
+def list_users(_: User = Depends(get_current_user), db: Session = Depends(get_db)) -> list[User]:
     return (
         db.query(User)
         .options(selectinload(User.role), selectinload(User.project_links), selectinload(User.form_links))
@@ -279,7 +333,11 @@ def list_users(_: User = Depends(require_roles("admin")), db: Session = Depends(
 
 
 @router.post("/users", response_model=UserOut, status_code=201)
-def create_user(payload: UserCreate, admin: User = Depends(require_roles("admin")), db: Session = Depends(get_db)) -> User:
+def create_user(
+    payload: UserCreate, admin: User = Depends(require_roles(*SYSTEM_MANAGER_ROLES)), db: Session = Depends(get_db)
+) -> User:
+    if role_name(admin) != "admin" and payload.form_ids:
+        raise HTTPException(status_code=403, detail="Apenas administradores podem vincular formularios")
     if db.query(User).filter_by(email=payload.email.lower()).first():
         raise HTTPException(status_code=409, detail="E-mail ja cadastrado")
     db_role = get_role(db, payload.role_id, payload.role)
@@ -301,7 +359,7 @@ def create_user(payload: UserCreate, admin: User = Depends(require_roles("admin"
 
 
 @router.get("/users/{user_id}", response_model=UserOut)
-def get_user(user_id: str, _: User = Depends(require_roles("admin")), db: Session = Depends(get_db)) -> User:
+def get_user(user_id: str, _: User = Depends(get_current_user), db: Session = Depends(get_db)) -> User:
     user = (
         db.query(User)
         .options(selectinload(User.role), selectinload(User.project_links), selectinload(User.form_links))
@@ -315,8 +373,10 @@ def get_user(user_id: str, _: User = Depends(require_roles("admin")), db: Sessio
 
 @router.put("/users/{user_id}", response_model=UserOut)
 def update_user(
-    user_id: str, payload: UserUpdate, admin: User = Depends(require_roles("admin")), db: Session = Depends(get_db)
+    user_id: str, payload: UserUpdate, admin: User = Depends(require_roles(*SYSTEM_MANAGER_ROLES)), db: Session = Depends(get_db)
 ) -> User:
+    if role_name(admin) != "admin" and payload.form_ids is not None:
+        raise HTTPException(status_code=403, detail="Apenas administradores podem alterar vinculos de formularios")
     user = db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="Usuario nao encontrado")
@@ -347,7 +407,9 @@ def update_user(
 
 
 @router.delete("/users/{user_id}")
-def delete_user(user_id: str, admin: User = Depends(require_roles("admin")), db: Session = Depends(get_db)) -> dict[str, str]:
+def delete_user(
+    user_id: str, admin: User = Depends(require_roles(*SYSTEM_MANAGER_ROLES)), db: Session = Depends(get_db)
+) -> dict[str, str]:
     user = db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="Usuario nao encontrado")
@@ -361,7 +423,7 @@ def delete_user(user_id: str, admin: User = Depends(require_roles("admin")), db:
 def reset_password(
     user_id: str,
     payload: dict | None = Body(default=None),
-    admin: User = Depends(require_roles("admin")),
+    admin: User = Depends(require_roles(*SYSTEM_MANAGER_ROLES)),
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
     user = db.get(User, user_id)
@@ -385,7 +447,7 @@ def list_projects(user: User = Depends(get_current_user), db: Session = Depends(
 
 @router.post("/projects", response_model=ProjectOut, status_code=201)
 def create_project(
-    payload: ProjectIn, admin: User = Depends(require_roles("admin")), db: Session = Depends(get_db)
+    payload: ProjectIn, admin: User = Depends(require_roles(*SYSTEM_MANAGER_ROLES)), db: Session = Depends(get_db)
 ) -> Project:
     project = Project(**payload.model_dump())
     db.add(project)
@@ -407,7 +469,7 @@ def get_project(project_id: str, user: User = Depends(get_current_user), db: Ses
 
 @router.put("/projects/{project_id}", response_model=ProjectOut)
 def update_project(
-    project_id: str, payload: ProjectIn, admin: User = Depends(require_roles("admin")), db: Session = Depends(get_db)
+    project_id: str, payload: ProjectIn, admin: User = Depends(require_roles(*SYSTEM_MANAGER_ROLES)), db: Session = Depends(get_db)
 ) -> Project:
     project = db.get(Project, project_id)
     if not project:
@@ -422,7 +484,7 @@ def update_project(
 
 @router.delete("/projects/{project_id}")
 def delete_project(
-    project_id: str, admin: User = Depends(require_roles("admin")), db: Session = Depends(get_db)
+    project_id: str, admin: User = Depends(require_roles(*SYSTEM_MANAGER_ROLES)), db: Session = Depends(get_db)
 ) -> dict[str, str]:
     project = db.get(Project, project_id)
     if not project:
@@ -437,7 +499,7 @@ def delete_project(
 def attach_project_user(
     project_id: str,
     user_id: str,
-    admin: User = Depends(require_roles("admin")),
+    admin: User = Depends(require_roles(*SYSTEM_MANAGER_ROLES)),
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
     if not db.get(Project, project_id) or not db.get(User, user_id):
@@ -454,7 +516,7 @@ def attach_project_user(
 def detach_project_user(
     project_id: str,
     user_id: str,
-    admin: User = Depends(require_roles("admin")),
+    admin: User = Depends(require_roles(*SYSTEM_MANAGER_ROLES)),
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
     db.query(ProjectUser).filter_by(project_id=project_id, user_id=user_id).delete()
@@ -471,7 +533,7 @@ def list_sections(project_id: str, user: User = Depends(get_current_user), db: S
 
 @router.post("/projects/{project_id}/sections", response_model=SectionOut, status_code=201)
 def create_section(
-    project_id: str, payload: SectionIn, admin: User = Depends(require_roles("admin")), db: Session = Depends(get_db)
+    project_id: str, payload: SectionIn, admin: User = Depends(require_roles(*SYSTEM_MANAGER_ROLES)), db: Session = Depends(get_db)
 ) -> Section:
     if not db.get(Project, project_id):
         raise HTTPException(status_code=404, detail="Projeto nao encontrado")
@@ -486,7 +548,7 @@ def create_section(
 
 @router.put("/sections/{section_id}", response_model=SectionOut)
 def update_section(
-    section_id: str, payload: SectionIn, admin: User = Depends(require_roles("admin")), db: Session = Depends(get_db)
+    section_id: str, payload: SectionIn, admin: User = Depends(require_roles(*SYSTEM_MANAGER_ROLES)), db: Session = Depends(get_db)
 ) -> Section:
     section = db.get(Section, section_id)
     if not section:
@@ -500,7 +562,9 @@ def update_section(
 
 
 @router.delete("/sections/{section_id}")
-def delete_section(section_id: str, admin: User = Depends(require_roles("admin")), db: Session = Depends(get_db)) -> dict[str, str]:
+def delete_section(
+    section_id: str, admin: User = Depends(require_roles(*SYSTEM_MANAGER_ROLES)), db: Session = Depends(get_db)
+) -> dict[str, str]:
     section = db.get(Section, section_id)
     if not section:
         raise HTTPException(status_code=404, detail="Trecho nao encontrado")
@@ -523,7 +587,7 @@ def list_work_points(
 
 @router.post("/sections/{section_id}/work-points", response_model=WorkPointOut, status_code=201)
 def create_work_point(
-    section_id: str, payload: WorkPointIn, admin: User = Depends(require_roles("admin")), db: Session = Depends(get_db)
+    section_id: str, payload: WorkPointIn, admin: User = Depends(require_roles(*SYSTEM_MANAGER_ROLES)), db: Session = Depends(get_db)
 ) -> WorkPoint:
     if not db.get(Section, section_id):
         raise HTTPException(status_code=404, detail="Trecho nao encontrado")
@@ -538,7 +602,7 @@ def create_work_point(
 
 @router.put("/work-points/{point_id}", response_model=WorkPointOut)
 def update_work_point(
-    point_id: str, payload: WorkPointIn, admin: User = Depends(require_roles("admin")), db: Session = Depends(get_db)
+    point_id: str, payload: WorkPointIn, admin: User = Depends(require_roles(*SYSTEM_MANAGER_ROLES)), db: Session = Depends(get_db)
 ) -> WorkPoint:
     point = db.get(WorkPoint, point_id)
     if not point:
@@ -552,7 +616,9 @@ def update_work_point(
 
 
 @router.delete("/work-points/{point_id}")
-def delete_work_point(point_id: str, admin: User = Depends(require_roles("admin")), db: Session = Depends(get_db)) -> dict[str, str]:
+def delete_work_point(
+    point_id: str, admin: User = Depends(require_roles(*SYSTEM_MANAGER_ROLES)), db: Session = Depends(get_db)
+) -> dict[str, str]:
     point = db.get(WorkPoint, point_id)
     if not point:
         raise HTTPException(status_code=404, detail="Ponto nao encontrado")
@@ -563,27 +629,22 @@ def delete_work_point(point_id: str, admin: User = Depends(require_roles("admin"
 
 
 @router.get("/forms", response_model=list[FormOut])
-def list_forms(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> list[Form]:
-    ids = visible_project_ids(db, user)
-    form_ids = visible_form_ids(db, user)
-    query = db.query(Form).options(selectinload(Form.fields)).order_by(Form.created_at.desc())
-    if ids is not None:
-        if not ids:
-            return []
-        query = query.filter(Form.project_id.in_(ids))
-    if form_ids is not None:
-        if not form_ids:
-            return []
-        query = query.filter(Form.id.in_(form_ids))
-    return query.all()
+def list_forms(_: User = Depends(require_roles("admin")), db: Session = Depends(get_db)) -> list[Form]:
+    return (
+        db.query(Form)
+        .options(selectinload(Form.fields), selectinload(Form.project_links))
+        .order_by(Form.created_at.desc())
+        .all()
+    )
 
 
 @router.post("/forms", response_model=FormOut, status_code=201)
 def create_form(payload: FormIn, admin: User = Depends(require_roles("admin")), db: Session = Depends(get_db)) -> Form:
-    if not db.get(Project, payload.project_id):
-        raise HTTPException(status_code=404, detail="Projeto nao encontrado")
+    valid_projects = [pid for pid in dict.fromkeys(payload.all_project_ids) if db.get(Project, pid)]
+    if not valid_projects:
+        raise HTTPException(status_code=422, detail="Informe ao menos um projeto valido para o formulario")
     form = Form(
-        project_id=payload.project_id,
+        project_id=valid_projects[0],
         name=payload.name,
         description=payload.description,
         status=payload.status,
@@ -591,6 +652,7 @@ def create_form(payload: FormIn, admin: User = Depends(require_roles("admin")), 
     )
     db.add(form)
     db.flush()
+    replace_form_projects(db, form, valid_projects)
     for field in payload.fields:
         db.add(FormField(form_id=form.id, version=1, **field.model_dump()))
     audit(db, admin, "forms", form.id, "create_form", payload.model_dump(mode="json"))
@@ -600,12 +662,12 @@ def create_form(payload: FormIn, admin: User = Depends(require_roles("admin")), 
 
 
 @router.get("/forms/{form_id}", response_model=FormOut)
-def get_form(form_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> Form:
-    form = db.query(Form).options(selectinload(Form.fields)).filter_by(id=form_id).first()
+def get_form(
+    form_id: str, _: User = Depends(require_roles("admin")), db: Session = Depends(get_db)
+) -> Form:
+    form = db.query(Form).options(selectinload(Form.fields), selectinload(Form.project_links)).filter_by(id=form_id).first()
     if not form:
         raise HTTPException(status_code=404, detail="Formulario nao encontrado")
-    ensure_project_access(db, user, form.project_id)
-    ensure_form_access(db, user, form.id)
     return form
 
 
@@ -616,7 +678,7 @@ def update_form(
     form = db.get(Form, form_id)
     if not form:
         raise HTTPException(status_code=404, detail="Formulario nao encontrado")
-    form.project_id = payload.project_id
+    replace_form_projects(db, form, payload.all_project_ids)
     form.name = payload.name
     form.description = payload.description
     form.status = payload.status
@@ -632,7 +694,7 @@ def update_form(
 
 @router.post("/forms/{form_id}/publish", response_model=FormOut)
 def publish_form(form_id: str, admin: User = Depends(require_roles("admin")), db: Session = Depends(get_db)) -> Form:
-    form = db.query(Form).options(selectinload(Form.fields)).filter_by(id=form_id).first()
+    form = db.query(Form).options(selectinload(Form.fields), selectinload(Form.project_links)).filter_by(id=form_id).first()
     if not form:
         raise HTTPException(status_code=404, detail="Formulario nao encontrado")
     form.status = "published"
@@ -678,15 +740,13 @@ def archive_form(form_id: str, admin: User = Depends(require_roles("admin")), db
 
 
 @router.get("/projects/{project_id}/forms", response_model=list[FormOut])
-def project_forms(project_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> list[Form]:
-    ensure_project_access(db, user, project_id)
-    query = db.query(Form).options(selectinload(Form.fields)).filter_by(project_id=project_id)
-    form_ids = visible_form_ids(db, user)
-    if form_ids is not None:
-        if not form_ids:
-            return []
-        query = query.filter(Form.id.in_(form_ids))
-    return query.all()
+def project_forms(
+    project_id: str, _: User = Depends(require_roles("admin")), db: Session = Depends(get_db)
+) -> list[Form]:
+    return forms_for_projects(
+        db.query(Form).options(selectinload(Form.fields), selectinload(Form.project_links)),
+        [project_id],
+    ).all()
 
 
 @router.get("/mobile/bootstrap", response_model=MobileBootstrapOut)
@@ -701,10 +761,9 @@ def mobile_bootstrap(user: User = Depends(get_current_user), db: Session = Depen
     sections = db.query(Section).filter(Section.project_id.in_(project_ids)).order_by(Section.order_index).all()
     section_ids = [section.id for section in sections]
     work_points = db.query(WorkPoint).filter(WorkPoint.section_id.in_(section_ids), WorkPoint.is_active.is_(True)).all()
-    forms = (
-        db.query(Form)
-        .options(selectinload(Form.fields))
-        .filter(Form.project_id.in_(project_ids), Form.status == "published")
+    forms = forms_for_projects(
+        db.query(Form).options(selectinload(Form.fields), selectinload(Form.project_links)).filter(Form.status == "published"),
+        project_ids,
     )
     if form_ids is not None:
         if not form_ids:
@@ -723,12 +782,27 @@ def mobile_projects(user: User = Depends(get_current_user), db: Session = Depend
 
 @router.get("/mobile/forms", response_model=list[FormOut])
 def mobile_forms(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> list[Form]:
-    return [form for form in list_forms(user, db) if form.status == "published"]
+    ids = visible_project_ids(db, user)
+    form_ids = visible_form_ids(db, user)
+    query = (
+        db.query(Form)
+        .options(selectinload(Form.fields), selectinload(Form.project_links))
+        .filter(Form.status == "published")
+    )
+    if ids is not None:
+        if not ids:
+            return []
+        query = forms_for_projects(query, ids)
+    if form_ids is not None:
+        if not form_ids:
+            return []
+        query = query.filter(Form.id.in_(form_ids))
+    return query.all()
 
 
 @router.post("/mobile/collections", response_model=CollectionOut, status_code=201)
 def mobile_collection(
-    payload: CollectionIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)
+    payload: CollectionIn, user: User = Depends(require_roles(*MOBILE_COLLECTION_WRITER_ROLES)), db: Session = Depends(get_db)
 ) -> Collection:
     collection = upsert_collection(db, payload, user)
     db.commit()
@@ -740,12 +814,13 @@ async def upload_photo(
     collection_id: str,
     photo_type: str,
     file: UploadFile = File(...),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_roles(*MOBILE_COLLECTION_WRITER_ROLES)),
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
     collection = db.get(Collection, collection_id)
     if not collection:
         raise HTTPException(status_code=404, detail="Coleta nao encontrada")
+    ensure_collection_update_access(user, collection)
     ensure_project_access(db, user, collection.project_id)
     ensure_form_access(db, user, collection.form_id)
     settings = get_settings()
@@ -756,15 +831,27 @@ async def upload_photo(
     file_path = upload_dir / filename
     content = await file.read()
     file_path.write_bytes(content)
-    photo = CollectionPhoto(
-        collection_id=collection_id,
-        photo_type=photo_type,
-        file_path=str(file_path),
-        original_filename=file.filename,
-        mime_type=file.content_type,
-        sync_status="synced",
+    # O sync do mobile ja cria a linha da foto com o caminho do dispositivo.
+    # Aqui apenas substituimos por arquivo real no servidor, evitando duplicar.
+    photo = (
+        db.query(CollectionPhoto)
+        .filter_by(collection_id=collection_id, photo_type=photo_type, original_filename=file.filename)
+        .first()
     )
-    db.add(photo)
+    if photo:
+        photo.file_path = str(file_path)
+        photo.mime_type = file.content_type
+        photo.sync_status = "synced"
+    else:
+        photo = CollectionPhoto(
+            collection_id=collection_id,
+            photo_type=photo_type,
+            file_path=str(file_path),
+            original_filename=file.filename,
+            mime_type=file.content_type,
+            sync_status="synced",
+        )
+        db.add(photo)
     db.flush()
     audit(db, user, "collection_photos", photo.id, "upload_photo", {"photo_type": photo_type})
     db.commit()
@@ -772,7 +859,9 @@ async def upload_photo(
 
 
 @router.post("/mobile/sync", response_model=MobileSyncOut)
-def mobile_sync(payload: MobileSyncIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> MobileSyncOut:
+def mobile_sync(
+    payload: MobileSyncIn, user: User = Depends(require_roles(*MOBILE_COLLECTION_WRITER_ROLES)), db: Session = Depends(get_db)
+) -> MobileSyncOut:
     synced: list[dict[str, str]] = []
     errors: list[dict[str, str]] = []
     for item in payload.collections:
@@ -814,6 +903,7 @@ def list_collections(
         ensure_project_access(db, user, project_id)
         query = query.filter(Collection.project_id == project_id)
     if form_id:
+        ensure_form_access(db, user, form_id)
         query = query.filter(Collection.form_id == form_id)
     if section_id:
         query = query.filter(Collection.section_id == section_id)
@@ -874,7 +964,7 @@ def review_collection(
 
 @router.delete("/collections/{collection_id}")
 def delete_collection(
-    collection_id: str, admin: User = Depends(require_roles("admin")), db: Session = Depends(get_db)
+    collection_id: str, admin: User = Depends(require_roles(*SYSTEM_MANAGER_ROLES)), db: Session = Depends(get_db)
 ) -> dict[str, str]:
     collection = db.get(Collection, collection_id)
     if not collection:
@@ -888,9 +978,12 @@ def delete_collection(
 @router.get("/exports/collections.xlsx")
 def export_xlsx(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> Response:
     ids = visible_project_ids(db, user)
+    form_ids = visible_form_ids(db, user)
     query = collection_query(db).order_by(Collection.created_at.desc())
     if ids is not None:
         query = query.filter(Collection.project_id.in_(ids))
+    if form_ids is not None:
+        query = query.filter(Collection.form_id.in_(form_ids))
     content = build_collections_xlsx(query.limit(5000).all())
     return Response(
         content,
@@ -902,9 +995,12 @@ def export_xlsx(user: User = Depends(get_current_user), db: Session = Depends(ge
 @router.get("/exports/collections.kmz")
 def export_kmz(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> Response:
     ids = visible_project_ids(db, user)
+    form_ids = visible_form_ids(db, user)
     query = collection_query(db).order_by(Collection.created_at.desc())
     if ids is not None:
         query = query.filter(Collection.project_id.in_(ids))
+    if form_ids is not None:
+        query = query.filter(Collection.form_id.in_(form_ids))
     content = build_collections_kmz(query.limit(5000).all())
     return Response(
         content,

@@ -121,6 +121,37 @@ class LocalStore {
         .toList();
   }
 
+  Future<List<Map<String, dynamic>>> allForms() async {
+    final rows = await db.query('forms', orderBy: 'payload');
+    return rows
+        .map(
+          (row) => jsonDecode(row['payload'] as String) as Map<String, dynamic>,
+        )
+        .toList();
+  }
+
+  Future<Map<String, dynamic>?> projectById(String projectId) async {
+    final rows = await db.query(
+      'projects',
+      where: 'id = ?',
+      whereArgs: [projectId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return jsonDecode(rows.first['payload'] as String) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>?> formById(String formId) async {
+    final rows = await db.query(
+      'forms',
+      where: 'id = ?',
+      whereArgs: [formId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return jsonDecode(rows.first['payload'] as String) as Map<String, dynamic>;
+  }
+
   Future<List<Map<String, dynamic>>> sectionsForProject(
     String projectId,
   ) async {

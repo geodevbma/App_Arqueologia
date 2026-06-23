@@ -8,6 +8,8 @@ import '../screens/login_screen.dart';
 import '../screens/poco_teste_form_screen.dart';
 import '../screens/project_forms_screen.dart';
 import '../screens/splash_screen.dart';
+import '../screens/user_editor_screen.dart';
+import '../screens/users_screen.dart';
 
 GoRouter createAppRouter() {
   return GoRouter(
@@ -20,6 +22,22 @@ GoRouter createAppRouter() {
       ),
       GoRoute(path: '/home', builder: (context, state) => const HomeShell()),
       GoRoute(
+        path: '/users',
+        builder: (context, state) => const UsersScreen(),
+      ),
+      GoRoute(
+        path: '/users/editor',
+        builder: (context, state) {
+          final args = state.extra! as Map<String, dynamic>;
+          return UserEditorScreen(
+            user: args['user'] as Map<String, dynamic>?,
+            projects: (args['projects'] as List<dynamic>)
+                .cast<Map<String, dynamic>>(),
+            forms: (args['forms'] as List<dynamic>).cast<Map<String, dynamic>>(),
+          );
+        },
+      ),
+      GoRoute(
         path: '/forms',
         builder: (context, state) =>
             ProjectFormsScreen(project: state.extra! as Map<String, dynamic>),
@@ -31,6 +49,7 @@ GoRouter createAppRouter() {
           return CollectionFormScreen(
             project: args['project'] as Map<String, dynamic>,
             form: args['form'] as Map<String, dynamic>,
+            collection: args['collection'] as Map<String, dynamic>?,
           );
         },
       ),

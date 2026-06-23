@@ -116,11 +116,17 @@ class FormFieldIn(BaseModel):
 
 
 class FormIn(BaseModel):
-    project_id: str
+    project_id: str | None = None
+    project_ids: list[str] = []
     name: str
     description: str | None = None
     status: Literal["draft", "published", "inactive"] = "draft"
     fields: list[FormFieldIn] = []
+
+    @property
+    def all_project_ids(self) -> list[str]:
+        ids = list(dict.fromkeys([*self.project_ids, *([self.project_id] if self.project_id else [])]))
+        return ids
 
 
 class FormFieldOut(ORMModel):
@@ -139,6 +145,7 @@ class FormFieldOut(ORMModel):
 class FormOut(ORMModel):
     id: str
     project_id: str
+    project_ids: list[str] = []
     name: str
     description: str | None
     status: str
