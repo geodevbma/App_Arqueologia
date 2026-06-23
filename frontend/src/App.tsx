@@ -45,7 +45,7 @@ import {
 } from "lucide-react";
 import {
   api,
-  exportUrl,
+  downloadExport,
   getCollections,
   getForms,
   getMe,
@@ -61,6 +61,7 @@ import brandtLogo from "./assets/brandt-logo.png";
 
 type View = "dashboard" | "users" | "projects" | "forms" | "collections" | "map";
 type Toast = { id: number; title: string; detail: string; tone: "success" | "error" | "info" };
+const newFormId = "__new_form__";
 
 const navItems: Array<{ id: View; label: string; icon: typeof Activity }> = [
   { id: "dashboard", label: "Dashboard", icon: Activity },
@@ -83,7 +84,50 @@ const fieldTypes = [
   "multiselect",
   "photo",
   "coordinate",
+  "coordinate_list",
+  "note",
+  "auto_user",
 ];
+
+function formProjectIds(form: { project_id: string; project_ids?: string[] }): string[] {
+  return form.project_ids && form.project_ids.length ? form.project_ids : [form.project_id];
+}
+
+type FieldChoice = { value: string; label: string };
+
+function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function readChoices(options: unknown): FieldChoice[] {
+  const raw = (options as { choices?: unknown })?.choices;
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item) => ({ value: String((item as FieldChoice).value), label: String((item as FieldChoice).label) }));
+}
+
+// "value = label" por linha; se nao houver "=", o value e derivado do label.
+function choicesToText(choices: FieldChoice[]): string {
+  return choices.map((choice) => (choice.value === slugify(choice.label) ? choice.label : `${choice.value} = ${choice.label}`)).join("\n");
+}
+
+function textToChoices(text: string): FieldChoice[] {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const sep = line.indexOf("=");
+      if (sep >= 0) {
+        return { value: slugify(line.slice(0, sep)), label: line.slice(sep + 1).trim() };
+      }
+      return { value: slugify(line), label: line };
+    });
+}
 
 const formatRole: Record<string, string> = {
   admin: "Administrador",
@@ -92,15 +136,29 @@ const formatRole: Record<string, string> = {
   viewer: "Visualizador",
 };
 
+const systemManagerRoles = new Set(["admin", "coordinator"]);
+
+function canManageSystem(user: User) {
+  return systemManagerRoles.has(user.role.name);
+}
+
+function canManageForms(user: User) {
+  return user.role.name === "admin";
+}
+
+function canReviewCollections(user: User) {
+  return systemManagerRoles.has(user.role.name);
+}
+
 const brand = {
   green: "#0A7354",
-  accent: "#339A51",
+  accent: "#0C8160",
   blue: "#0F486E",
-  dark: "#061411",
-  soft: "#F4F8F6",
-  border: "#DCE7E3",
-  text: "#10231F",
-  muted: "#64756F",
+  dark: "#14201C",
+  soft: "#F7F8F7",
+  border: "#E7EAE8",
+  text: "#14201C",
+  muted: "#687671",
 };
 
 function cx(...classes: Array<string | false | undefined>) {
@@ -109,6 +167,10 @@ function cx(...classes: Array<string | false | undefined>) {
 
 function getAnswer(collection: Collection, key: string) {
   return collection.answers.find((answer) => answer.field_key === key)?.answer_value;
+}
+
+function sortFields(fields: FormField[]) {
+  return [...fields].sort((a, b) => a.order_index - b.order_index);
 }
 
 function initials(name: string) {
@@ -153,10 +215,10 @@ function Button({
   disabled?: boolean;
 }) {
   const toneClass = {
-    primary: "brand-gradient text-white shadow-lg shadow-emerald-900/20 hover:shadow-xl",
-    secondary: "bg-[#EAF4F0] text-[#0A7354] hover:bg-[#D9ECE5]",
-    ghost: "bg-white/70 text-[#10231F] ring-1 ring-[#DCE7E3] hover:bg-white",
-    danger: "bg-[#A23A35] text-white hover:bg-[#842d2a]",
+    primary: "brand-gradient text-white shadow-xs hover:shadow-sm",
+    secondary: "bg-[#EAF5F0] text-[#0A7354] ring-1 ring-[#CDE7DD] hover:bg-[#DEF0E8]",
+    ghost: "bg-white text-[#3A4742] ring-1 ring-[#E7EAE8] hover:bg-[#F7F8F7]",
+    danger: "bg-[#B4322C] text-white hover:bg-[#9a2a25]",
   }[tone];
   return (
     <button
@@ -164,7 +226,7 @@ function Button({
       onClick={onClick}
       disabled={disabled}
       className={cx(
-        "premium-btn inline-flex min-h-10 max-w-full items-center justify-center gap-2 rounded-lg px-4 text-center text-sm font-semibold leading-tight disabled:pointer-events-none disabled:opacity-60",
+        "premium-btn inline-flex min-h-10 max-w-full items-center justify-center gap-2 rounded-lg px-3.5 text-center text-sm font-medium leading-tight disabled:pointer-events-none disabled:opacity-60",
         toneClass,
       )}
     >
@@ -175,12 +237,12 @@ function Button({
 
 function Badge({ children, tone = "neutral" }: { children: React.ReactNode; tone?: "green" | "amber" | "red" | "neutral" }) {
   const colors = {
-    green: "bg-[#E8F5EF] text-[#0A7354] ring-[#B8DED0]",
-    amber: "bg-[#FFF4DA] text-[#946200] ring-[#F1D08A]",
-    red: "bg-[#FCE8E6] text-[#A23A35] ring-[#F1B7B2]",
-    neutral: "bg-[#F4F8F6] text-[#64756F] ring-[#DCE7E3]",
+    green: "bg-[#EAF5F0] text-[#0A7354] ring-[#CDE7DD]",
+    amber: "bg-[#FBF3E2] text-[#8A5A12] ring-[#EAD9B0]",
+    red: "bg-[#FBEAE8] text-[#A23A35] ring-[#EFCBC7]",
+    neutral: "bg-[#F2F4F3] text-[#687671] ring-[#E2E6E4]",
   };
-  return <span className={cx("inline-flex max-w-full items-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1", colors[tone])}>{children}</span>;
+  return <span className={cx("inline-flex max-w-full items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1", colors[tone])}>{children}</span>;
 }
 
 function Field({
@@ -191,7 +253,7 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <label className="grid min-w-0 gap-2 text-sm font-semibold text-[#294038]">
+    <label className="grid min-w-0 gap-1.5 text-sm font-medium text-[#3A4742]">
       {label}
       {children}
     </label>
@@ -203,7 +265,7 @@ function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
     <input
       {...props}
       className={cx(
-        "min-h-11 w-full min-w-0 max-w-full rounded-lg border border-[#DCE7E3] bg-white px-3 text-sm text-[#10231F] outline-none transition focus:border-[#0A7354] focus:ring-4 focus:ring-[#0A7354]/10",
+        "min-h-10 w-full min-w-0 max-w-full rounded-lg border border-[#E7EAE8] bg-white px-3 text-sm text-[#14201C] outline-none transition placeholder:text-[#9aa6a1] focus:border-[#0A7354] focus:ring-2 focus:ring-[#0A7354]/15",
         props.className,
       )}
     />
@@ -215,7 +277,7 @@ function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
     <select
       {...props}
       className={cx(
-        "min-h-11 w-full min-w-0 max-w-full rounded-lg border border-[#DCE7E3] bg-white px-3 text-sm text-[#10231F] outline-none transition focus:border-[#0A7354] focus:ring-4 focus:ring-[#0A7354]/10",
+        "min-h-10 w-full min-w-0 max-w-full rounded-lg border border-[#E7EAE8] bg-white px-3 text-sm text-[#14201C] outline-none transition focus:border-[#0A7354] focus:ring-2 focus:ring-[#0A7354]/15",
         props.className,
       )}
     />
@@ -227,7 +289,7 @@ function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
     <textarea
       {...props}
       className={cx(
-        "min-h-28 w-full min-w-0 max-w-full rounded-lg border border-[#DCE7E3] bg-white px-3 py-3 text-sm text-[#10231F] outline-none transition focus:border-[#0A7354] focus:ring-4 focus:ring-[#0A7354]/10",
+        "min-h-28 w-full min-w-0 max-w-full rounded-lg border border-[#E7EAE8] bg-white px-3 py-3 text-sm text-[#14201C] outline-none transition placeholder:text-[#9aa6a1] focus:border-[#0A7354] focus:ring-2 focus:ring-[#0A7354]/15",
         props.className,
       )}
     />
@@ -259,8 +321,8 @@ function EmptyState({ icon: Icon, title, detail }: { icon: typeof Activity; titl
 function LoginScreen({ onToast }: { onToast: (toast: Omit<Toast, "id">) => void }) {
   const setToken = useAuthStore((state) => state.setToken);
   const queryClient = useQueryClient();
-  const [email, setEmail] = useState("admin@brandt.local");
-  const [password, setPassword] = useState("Admin123!");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const mutation = useMutation({
     mutationFn: () => login(email, password),
     onSuccess: (token) => {
@@ -287,16 +349,16 @@ function LoginScreen({ onToast }: { onToast: (toast: Omit<Toast, "id">) => void 
           transition={{ duration: 0.55 }}
           className="space-y-8"
         >
-          <div className="inline-flex items-center gap-2 rounded-full bg-white/85 px-4 py-2 text-sm font-semibold text-[#0A7354] shadow-sm ring-1 ring-[#DCE7E3]">
+          <div className="inline-flex items-center gap-2 rounded-full bg-[#EAF5F0] px-3.5 py-1.5 text-sm font-medium text-[#0A7354] ring-1 ring-[#CDE7DD]">
             <Sparkles className="h-4 w-4" />
             Produto oficial Brandt
           </div>
           <BrandtLogo />
           <div>
-            <h1 className="max-w-3xl text-4xl font-semibold leading-tight text-[#10231F] md:text-6xl">
+            <h1 className="max-w-3xl text-4xl font-semibold leading-[1.1] tracking-tight text-[#14201C] md:text-5xl">
               Sistema de Acompanhamento Arqueologico
             </h1>
-            <p className="mt-5 max-w-2xl text-lg leading-8 text-[#64756F]">
+            <p className="mt-5 max-w-2xl text-lg leading-8 text-[#687671]">
               Coleta, sincronizacao e gestao de campo com identidade institucional Brandt, uso offline e rastreabilidade.
             </p>
           </div>
@@ -320,6 +382,7 @@ function LoginScreen({ onToast }: { onToast: (toast: Omit<Toast, "id">) => void 
 
         <motion.form
           onSubmit={handleSubmit}
+          autoComplete="off"
           initial={{ opacity: 0, scale: 0.98, y: 18 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           transition={{ duration: 0.45, delay: 0.08 }}
@@ -337,19 +400,31 @@ function LoginScreen({ onToast }: { onToast: (toast: Omit<Toast, "id">) => void 
           </div>
           <div className="grid gap-4">
             <Field label="E-mail">
-              <TextInput type="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
+              <TextInput
+                type="email"
+                name="brandt-login-email"
+                autoComplete="off"
+                placeholder="seuemail@empresa.com.br"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                required
+              />
             </Field>
             <Field label="Senha">
-              <TextInput type="password" value={password} onChange={(event) => setPassword(event.target.value)} required />
+              <TextInput
+                type="password"
+                name="brandt-login-password"
+                autoComplete="new-password"
+                placeholder="Digite sua senha"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+              />
             </Field>
             <Button type="submit" disabled={mutation.isPending}>
               {mutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
               Entrar
             </Button>
-          </div>
-          <div className="mt-6 rounded-lg border border-[#DCE7E3] bg-[#F4F8F6] p-4 text-sm text-[#64756F]">
-            <p className="font-semibold text-[#10231F]">Credencial inicial</p>
-            <p>admin@brandt.local / Admin123!</p>
           </div>
         </motion.form>
       </div>
@@ -397,6 +472,7 @@ function Shell({
   const setToken = useAuthStore((state) => state.setToken);
   const queryClient = useQueryClient();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const visibleNavItems = navItems.filter((item) => item.id !== "forms" || canManageForms(me));
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-[#F4F8F6] text-[#10231F]">
@@ -409,16 +485,16 @@ function Shell({
         transition={{ type: "spring", stiffness: 420, damping: 38, mass: 0.8 }}
         aria-hidden={!sidebarOpen}
         className={cx(
-          "fixed inset-y-0 left-0 z-30 hidden w-72 border-r border-white/10 bg-[#061411] p-4 text-white shadow-2xl shadow-black/20 lg:block",
+          "fixed inset-y-0 left-0 z-30 hidden w-72 border-r border-[#E7EAE8] bg-white p-4 text-[#14201C] lg:block",
           sidebarOpen ? "pointer-events-auto" : "pointer-events-none",
         )}
       >
-        <div className="mb-8 rounded-lg bg-white p-3 shadow-2xl shadow-black/20">
+        <div className="mb-7 flex items-center justify-between border-b border-[#EFF1F0] pb-4">
           <BrandtLogo compact />
-          <p className="mt-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#0A7354]">Arqueologia</p>
+          <span className="rounded-md bg-[#EAF5F0] px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#0A7354]">Arqueologia</span>
         </div>
-        <nav className="grid gap-2">
-          {navItems.map((item) => {
+        <nav className="grid gap-1">
+          {visibleNavItems.map((item) => {
             const Icon = item.icon;
             const active = view === item.id;
             return (
@@ -427,24 +503,31 @@ function Shell({
                 type="button"
                 onClick={() => setView(item.id)}
                 className={cx(
-                  "flex items-center gap-3 rounded-lg px-3 py-3 text-left text-sm font-semibold transition",
+                  "flex items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition",
                   active
-                    ? "bg-white text-[#0A7354] shadow-xl"
-                    : "text-white/68 hover:bg-white/10 hover:text-white",
+                    ? "bg-[#EAF5F0] text-[#0A7354]"
+                    : "text-[#687671] hover:bg-[#F2F4F3] hover:text-[#14201C]",
                 )}
               >
-                <Icon className="h-4 w-4" />
+                <Icon className={cx("h-4 w-4", active ? "text-[#0A7354]" : "text-[#9aa6a1]")} />
                 {item.label}
               </button>
             );
           })}
         </nav>
-        <div className="absolute bottom-4 left-4 right-4 rounded-lg border border-white/10 bg-white/8 p-4">
-          <p className="text-sm font-semibold">{me.name}</p>
-          <p className="text-xs text-white/55">{formatRole[me.role.name] ?? me.role.name}</p>
+        <div className="absolute bottom-4 left-4 right-4 rounded-lg border border-[#E7EAE8] bg-[#F9FAF9] p-4">
+          <div className="flex items-center gap-3">
+            <div className="brand-gradient grid h-9 w-9 shrink-0 place-items-center rounded-lg text-xs font-bold text-white">
+              {initials(me.name)}
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-[#14201C]">{me.name}</p>
+              <p className="truncate text-xs text-[#687671]">{formatRole[me.role.name] ?? me.role.name}</p>
+            </div>
+          </div>
           <button
             type="button"
-            className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-white/75 hover:text-white"
+            className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-[#687671] transition hover:text-[#B4322C]"
             onClick={() => {
               setToken(null);
               queryClient.clear();
@@ -457,12 +540,12 @@ function Shell({
       </motion.aside>
 
       <div className={cx("min-w-0 transition-all duration-300 ease-out", sidebarOpen && "lg:pl-72")}>
-        <header className="sticky top-0 z-20 min-w-0 border-b border-[#DCE7E3] bg-[#F4F8F6]/88 px-4 py-4 backdrop-blur-xl md:px-8">
+        <header className="sticky top-0 z-20 min-w-0 border-b border-[#E7EAE8] bg-white/80 px-4 py-3.5 backdrop-blur-xl md:px-8">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
               <button
                 type="button"
-                className="hidden h-10 w-10 shrink-0 place-items-center rounded-lg bg-white text-[#0A7354] shadow-sm ring-1 ring-[#DCE7E3] transition hover:bg-[#EAF4F0] lg:grid"
+                className="hidden h-9 w-9 shrink-0 place-items-center rounded-lg bg-white text-[#687671] ring-1 ring-[#E7EAE8] transition hover:bg-[#F2F4F3] hover:text-[#0A7354] lg:grid"
                 onClick={() => setSidebarOpen((current) => !current)}
                 aria-label={sidebarOpen ? "Esconder menu lateral" : "Mostrar menu lateral"}
                 title={sidebarOpen ? "Esconder menu lateral" : "Mostrar menu lateral"}
@@ -470,13 +553,18 @@ function Shell({
                 {sidebarOpen ? <PanelLeftClose className="h-5 w-5" /> : <PanelLeftOpen className="h-5 w-5" />}
               </button>
               <div className="min-w-0">
-                <p className="text-sm font-semibold text-[#0A7354]">Sistema de Acompanhamento Arqueologico</p>
-                <h1 className="text-2xl font-semibold text-[#10231F]">{navItems.find((item) => item.id === view)?.label}</h1>
+                <p className="text-xs font-medium text-[#687671]">Sistema de Acompanhamento Arqueologico</p>
+                <h1 className="text-xl font-semibold tracking-tight text-[#14201C]">{visibleNavItems.find((item) => item.id === view)?.label}</h1>
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <Badge tone="green">API REST</Badge>
-              <Badge tone="amber">Offline-first</Badge>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-[#EAF5F0] px-2.5 py-1 text-xs font-medium text-[#0A7354] ring-1 ring-[#CDE7DD]">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#0A7354]" />
+                API REST
+              </span>
+              <span className="hidden items-center gap-1.5 rounded-full bg-[#F2F4F3] px-2.5 py-1 text-xs font-medium text-[#687671] ring-1 ring-[#E2E6E4] sm:inline-flex">
+                Offline-first
+              </span>
             </div>
           </div>
           <motion.div
@@ -490,7 +578,7 @@ function Shell({
             transition={{ duration: 0.22, ease: "easeOut" }}
             className={cx("flex gap-2 overflow-x-auto", sidebarOpen && "lg:pointer-events-none")}
           >
-            {navItems.map((item) => {
+            {visibleNavItems.map((item) => {
               const Icon = item.icon;
               return (
                 <button
@@ -498,8 +586,10 @@ function Shell({
                   type="button"
                   onClick={() => setView(item.id)}
                   className={cx(
-                    "inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold",
-                    view === item.id ? "brand-gradient text-white" : "bg-white text-[#10231F] ring-1 ring-[#DCE7E3]",
+                    "inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition",
+                    view === item.id
+                      ? "bg-[#EAF5F0] text-[#0A7354] ring-1 ring-[#CDE7DD]"
+                      : "bg-white text-[#687671] ring-1 ring-[#E7EAE8] hover:text-[#14201C]",
                   )}
                 >
                   <Icon className="h-4 w-4" />
@@ -523,7 +613,17 @@ function Shell({
   );
 }
 
-function Dashboard({ projects, collections, forms }: { projects: Project[]; collections: Collection[]; forms: DynamicForm[] }) {
+function Dashboard({
+  projects,
+  collections,
+  forms,
+  canViewForms,
+}: {
+  projects: Project[];
+  collections: Collection[];
+  forms: DynamicForm[];
+  canViewForms: boolean;
+}) {
   const vestigios = collections.filter((item) => getAnswer(item, "vestigio_identificado") === true).length;
   const intercorrencias = collections.filter((item) => getAnswer(item, "intercorrencia_identificada") === true).length;
   const pending = collections.filter((item) => item.sync_status !== "synced").length;
@@ -539,38 +639,38 @@ function Dashboard({ projects, collections, forms }: { projects: Project[]; coll
   const syncRows: Array<[string, number, "green" | "amber" | "red" | "neutral"]> = [
     ["Sincronizadas", synced, "green"],
     ["Pendentes/erro", pending, pending ? "amber" : "neutral"],
-    ["Formulario publicado", forms.filter((form) => form.status === "published").length, "green"],
   ];
+  if (canViewForms) {
+    syncRows.push(["Formulario publicado", forms.filter((form) => form.status === "published").length, "green"]);
+  }
 
   return (
     <div className="grid min-w-0 gap-6">
       <section className="grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
         {[
-          { label: "Total de coletas", value: collections.length, icon: Archive, tone: "from-[#0A7354]/12 to-[#0F486E]/8" },
-          { label: "Sincronizadas", value: synced, icon: Cloud, tone: "from-[#339A51]/12 to-[#0A7354]/8" },
-          { label: "Pendencias", value: pending, icon: UploadCloud, tone: "from-[#D8A23F]/18 to-[#0A7354]/6" },
-          { label: "Vestigios", value: vestigios, icon: Sparkles, tone: "from-[#0F486E]/12 to-[#339A51]/8" },
-          { label: "Intercorrencias", value: intercorrencias, icon: BadgeCheck, tone: "from-[#A23A35]/10 to-[#0F486E]/6" },
-          { label: "Projetos ativos", value: projects.length, icon: Building2, tone: "from-[#0A7354]/12 to-[#339A51]/8" },
+          { label: "Total de coletas", value: collections.length, icon: Archive },
+          { label: "Sincronizadas", value: synced, icon: Cloud },
+          { label: "Pendencias", value: pending, icon: UploadCloud },
+          { label: "Vestigios", value: vestigios, icon: Sparkles },
+          { label: "Intercorrencias", value: intercorrencias, icon: BadgeCheck },
+          { label: "Projetos ativos", value: projects.length, icon: Building2 },
         ].map((card, index) => {
           const Icon = card.icon;
           return (
             <motion.div
               key={card.label}
-              initial={{ opacity: 0, y: 14 }}
+              initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.04 }}
-              whileHover={{ y: -4 }}
-              className={cx("brand-card min-w-0 bg-gradient-to-br p-5 transition", card.tone)}
+              transition={{ delay: index * 0.03 }}
+              className="brand-card min-w-0 p-5"
             >
-              <div className="flex items-center justify-between">
-                <div className="grid h-11 w-11 place-items-center rounded-lg bg-white shadow-sm ring-1 ring-[#DCE7E3]">
-                  <Icon className="h-5 w-5 text-[#0A7354]" />
+              <div className="flex items-center gap-2.5">
+                <div className="grid h-9 w-9 place-items-center rounded-lg bg-[#EAF5F0] ring-1 ring-[#CDE7DD]">
+                  <Icon className="h-4 w-4 text-[#0A7354]" />
                 </div>
-                <ChevronDown className="h-4 w-4 text-[#64756F]" />
+                <p className="text-sm font-medium text-[#687671]">{card.label}</p>
               </div>
-              <p className="mt-6 text-3xl font-semibold text-[#10231F]">{card.value}</p>
-              <p className="text-sm text-[#64756F]">{card.label}</p>
+              <p className="mt-4 text-3xl font-semibold tracking-tight text-[#14201C]">{card.value}</p>
             </motion.div>
           );
         })}
@@ -685,11 +785,15 @@ function UsersView({
   users,
   projects,
   forms,
+  canManageUsers,
+  canManageFormAccess,
   onToast,
 }: {
   users: User[];
   projects: Project[];
   forms: DynamicForm[];
+  canManageUsers: boolean;
+  canManageFormAccess: boolean;
   onToast: (toast: Omit<Toast, "id">) => void;
 }) {
   const queryClient = useQueryClient();
@@ -707,7 +811,7 @@ function UsersView({
   const [userFilter, setUserFilter] = useState("");
   const selectedUser = users.find((user) => user.id === selectedUserId) ?? null;
   const selectedProjectIds = new Set(draft.project_ids);
-  const availableForms = forms.filter((form) => selectedProjectIds.has(form.project_id));
+  const availableForms = forms.filter((form) => formProjectIds(form).some((id) => selectedProjectIds.has(id)));
   const filteredUsers = useMemo(() => {
     const normalized = userFilter.trim().toLowerCase();
     if (!normalized) return users;
@@ -717,17 +821,8 @@ function UsersView({
     });
   }, [userFilter, users]);
   const saveMutation = useMutation({
-    mutationFn: () => {
-      const payload = {
-        name: draft.name,
-        email: draft.email,
-        role: draft.role,
-        is_active: draft.is_active,
-        project_ids: draft.project_ids,
-        form_ids: draft.form_ids,
-        ...(draft.password ? { password: draft.password } : {}),
-      };
-      if (selectedUser) return api.put(`/users/${selectedUser.id}`, payload);
+    mutationFn: ({ userId, payload }: { userId: string | null; payload: Record<string, unknown> }) => {
+      if (userId) return api.put(`/users/${userId}`, payload);
       return api.post("/users", payload);
     },
     onSuccess: () => {
@@ -769,10 +864,13 @@ function UsersView({
       const projectIds = checked
         ? [...new Set([...current.project_ids, projectId])]
         : current.project_ids.filter((id) => id !== projectId);
+      if (!canManageFormAccess) {
+        return { ...current, project_ids: projectIds };
+      }
       const allowedProjectIds = new Set(projectIds);
       const formIds = current.form_ids.filter((formId) => {
         const form = forms.find((item) => item.id === formId);
-        return form ? allowedProjectIds.has(form.project_id) : false;
+        return form ? formProjectIds(form).some((id) => allowedProjectIds.has(id)) : false;
       });
       return { ...current, project_ids: projectIds, form_ids: formIds };
     });
@@ -786,12 +884,14 @@ function UsersView({
   }
 
   return (
-    <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(340px,420px)]">
+    <div className={cx("grid min-w-0 gap-6", canManageUsers && "xl:grid-cols-[minmax(0,1fr)_minmax(340px,420px)]")}>
       <section className="brand-card min-w-0 p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold">Usuarios e permissoes</h2>
-            <p className="text-sm text-[#64756F]">Clique em uma linha para editar senha, perfil e acessos.</p>
+            <p className="text-sm text-[#64756F]">
+              {canManageUsers ? "Clique em uma linha para editar senha, perfil e acessos." : "Consulta dos usuarios cadastrados e seus vinculos."}
+            </p>
           </div>
           <div className="relative w-full sm:w-64">
             <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-[#64756F]" />
@@ -827,9 +927,10 @@ function UsersView({
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: index * 0.025 }}
-                    onClick={() => startEdit(user)}
+                    onClick={canManageUsers ? () => startEdit(user) : undefined}
                     className={cx(
-                      "cursor-pointer bg-white shadow-sm ring-1 ring-[#DCE7E3]/70 transition hover:bg-[#F8FBFA]",
+                      "bg-white shadow-sm ring-1 ring-[#DCE7E3]/70 transition hover:bg-[#F8FBFA]",
+                      canManageUsers && "cursor-pointer",
                       selectedUserId === user.id && "ring-2 ring-[#0A7354]",
                     )}
                   >
@@ -848,7 +949,7 @@ function UsersView({
                     <td className="px-3 py-4">
                       <div className="flex flex-wrap gap-2">
                         <Badge>{user.project_ids?.length ?? 0} projetos</Badge>
-                        <Badge>{user.form_ids?.length ?? 0} formularios</Badge>
+                        {canManageFormAccess ? <Badge>{user.form_ids?.length ?? 0} formularios</Badge> : null}
                       </div>
                     </td>
                     <td className="rounded-r-lg px-3 py-4">
@@ -861,12 +962,17 @@ function UsersView({
           </div>
         )}
       </section>
+      {canManageUsers ? (
       <aside className="brand-card min-w-0 p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <h2 className="text-lg font-semibold">{selectedUser ? "Editar usuario" : "Novo usuario"}</h2>
             <p className="mt-1 text-sm text-[#64756F]">
-              {selectedUser ? "Altere senha, perfil e vinculos de acesso." : "Crie usuario com projetos e formularios liberados."}
+              {selectedUser
+                ? "Altere senha, perfil e vinculos de acesso."
+                : canManageFormAccess
+                  ? "Crie usuario com projetos e formularios liberados."
+                  : "Crie usuario com os projetos liberados."}
             </p>
           </div>
           {selectedUser ? (
@@ -884,7 +990,16 @@ function UsersView({
               onToast({ tone: "error", title: "Senha obrigatoria", detail: "Informe uma senha inicial para criar o usuario." });
               return;
             }
-            saveMutation.mutate();
+            const payload = {
+              name: draft.name,
+              email: draft.email,
+              role: draft.role,
+              is_active: draft.is_active,
+              project_ids: [...new Set(draft.project_ids)],
+              ...(canManageFormAccess ? { form_ids: [...new Set(draft.form_ids)] } : {}),
+              ...(draft.password ? { password: draft.password } : {}),
+            };
+            saveMutation.mutate({ userId: selectedUser?.id ?? null, payload });
           }}
         >
           <Field label="Nome">
@@ -941,42 +1056,53 @@ function UsersView({
               )}
             </div>
           </div>
-          <div className="grid min-w-0 gap-2">
-            <p className="text-sm font-semibold text-[#294038]">Formularios vinculados</p>
-            <div className="grid max-h-48 gap-2 overflow-y-auto rounded-lg border border-[#DCE7E3] bg-[#F8FBFA] p-3">
-              {availableForms.length ? (
-                availableForms.map((form) => (
-                  <label key={form.id} className="flex min-w-0 items-start gap-2 text-sm">
-                    <input
-                      className="mt-1"
-                      type="checkbox"
-                      checked={draft.form_ids.includes(form.id)}
-                      onChange={(event) => toggleForm(form.id, event.target.checked)}
-                    />
-                    <span className="min-w-0">
-                      <span className="block break-words font-semibold text-[#10231F]">{form.name}</span>
-                      <span className="text-xs text-[#64756F]">
-                        {projects.find((project) => project.id === form.project_id)?.name || "Projeto"} - {form.status}
+          {canManageFormAccess ? (
+            <div className="grid min-w-0 gap-2">
+              <p className="text-sm font-semibold text-[#294038]">Formularios vinculados</p>
+              <div className="grid max-h-48 gap-2 overflow-y-auto rounded-lg border border-[#DCE7E3] bg-[#F8FBFA] p-3">
+                {availableForms.length ? (
+                  availableForms.map((form) => (
+                    <label key={form.id} className="flex min-w-0 items-start gap-2 text-sm">
+                      <input
+                        className="mt-1"
+                        type="checkbox"
+                        checked={draft.form_ids.includes(form.id)}
+                        onChange={(event) => toggleForm(form.id, event.target.checked)}
+                      />
+                      <span className="min-w-0">
+                        <span className="block break-words font-semibold text-[#10231F]">{form.name}</span>
+                        <span className="text-xs text-[#64756F]">
+                          {projects.find((project) => project.id === form.project_id)?.name || "Projeto"} - {form.status}
+                        </span>
                       </span>
-                    </span>
-                  </label>
-                ))
-              ) : (
-                <p className="text-sm text-[#64756F]">Selecione um projeto para liberar formularios.</p>
-              )}
+                    </label>
+                  ))
+                ) : (
+                  <p className="text-sm text-[#64756F]">Selecione um projeto para liberar formularios.</p>
+                )}
+              </div>
             </div>
-          </div>
+          ) : null}
           <Button type="submit" disabled={saveMutation.isPending}>
             {saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : selectedUser ? <Save className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
             {selectedUser ? "Salvar usuario" : "Criar usuario"}
           </Button>
         </form>
       </aside>
+      ) : null}
     </div>
   );
 }
 
-function ProjectsView({ projects, onToast }: { projects: Project[]; onToast: (toast: Omit<Toast, "id">) => void }) {
+function ProjectsView({
+  projects,
+  canManageSystem,
+  onToast,
+}: {
+  projects: Project[];
+  canManageSystem: boolean;
+  onToast: (toast: Omit<Toast, "id">) => void;
+}) {
   const queryClient = useQueryClient();
   const [selectedProjectId, setSelectedProjectId] = useState(projects[0]?.id ?? "");
   const activeProjectId = selectedProjectId || projects[0]?.id || "";
@@ -1053,7 +1179,7 @@ function ProjectsView({ projects, onToast }: { projects: Project[]; onToast: (to
         ))}
       </section>
 
-      <section className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(320px,360px)]">
+      <section className={cx("grid min-w-0 gap-6", canManageSystem && "xl:grid-cols-[minmax(0,1fr)_minmax(320px,360px)]")}>
         <div className="brand-card min-w-0 p-5">
           <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -1089,6 +1215,7 @@ function ProjectsView({ projects, onToast }: { projects: Project[]; onToast: (to
             </div>
           )}
         </div>
+        {canManageSystem ? (
         <aside className="grid min-w-0 gap-4">
           <form
             className="brand-card min-w-0 p-5"
@@ -1141,29 +1268,73 @@ function ProjectsView({ projects, onToast }: { projects: Project[]; onToast: (to
             </div>
           </form>
         </aside>
+        ) : null}
       </section>
     </div>
   );
 }
 
-function FormsView({ forms, projects, onToast }: { forms: DynamicForm[]; projects: Project[]; onToast: (toast: Omit<Toast, "id">) => void }) {
+function FormsView({
+  forms,
+  projects,
+  canManageForms,
+  onToast,
+}: {
+  forms: DynamicForm[];
+  projects: Project[];
+  canManageForms: boolean;
+  onToast: (toast: Omit<Toast, "id">) => void;
+}) {
   const queryClient = useQueryClient();
-  const [selectedId, setSelectedId] = useState(forms[0]?.id ?? "");
-  const selected = forms.find((form) => form.id === selectedId) ?? forms[0];
-  const [fields, setFields] = useState<FormField[]>(selected?.fields ?? []);
-  const [name, setName] = useState(selected?.name ?? "");
-  const [projectId, setProjectId] = useState(selected?.project_id ?? projects[0]?.id ?? "");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selected = selectedId === newFormId ? undefined : selectedId ? forms.find((form) => form.id === selectedId) ?? forms[0] : forms[0];
+  const [fields, setFields] = useState<FormField[]>([]);
+  const [name, setName] = useState("");
+  const [projectIds, setProjectIds] = useState<string[]>([]);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [selectedFieldIndex, setSelectedFieldIndex] = useState(0);
+  const currentFields = selectedId === null && selected ? sortFields(selected.fields) : fields;
+  const currentName = selectedId === null ? selected?.name ?? "" : name;
+  const currentProjectIds =
+    selectedId === null
+      ? selected
+        ? formProjectIds(selected)
+        : projects[0]
+          ? [projects[0].id]
+          : []
+      : projectIds;
+
+  function openForm(form: DynamicForm) {
+    setSelectedId(form.id);
+    setFields(sortFields(form.fields));
+    setName(form.name);
+    setProjectIds(formProjectIds(form));
+    setSelectedFieldIndex(0);
+  }
+
+  function startEditingSelected() {
+    if (selectedId !== null || !selected) return;
+    setSelectedId(selected.id);
+    setFields(sortFields(selected.fields));
+    setName(selected.name);
+    setProjectIds(formProjectIds(selected));
+  }
+
+  function toggleFormProject(projectId: string, checked: boolean) {
+    startEditingSelected();
+    setProjectIds((current) =>
+      checked ? [...new Set([...current, projectId])] : current.filter((id) => id !== projectId),
+    );
+  }
 
   const saveMutation = useMutation({
     mutationFn: () => {
       const payload = {
-        project_id: projectId,
-        name,
+        project_ids: currentProjectIds,
+        name: currentName,
         description: "Formulario dinamico gerenciado pelo builder web.",
         status: selected?.status ?? "draft",
-        fields: fields.map((field, index) => ({ ...field, order_index: index + 1 })),
+        fields: currentFields.map((field, index) => ({ ...field, order_index: index + 1 })),
       };
       if (selected) return api.put(`/forms/${selected.id}`, payload);
       return api.post("/forms", payload);
@@ -1182,22 +1353,24 @@ function FormsView({ forms, projects, onToast }: { forms: DynamicForm[]; project
   });
 
   function addField() {
-    setFields((current) => [
-      ...current,
+    startEditingSelected();
+    setFields([
+      ...currentFields,
       {
         label: "Novo campo",
-        field_key: `campo_${current.length + 1}`,
+        field_key: `campo_${currentFields.length + 1}`,
         field_type: "text",
         is_required: false,
-        order_index: current.length + 1,
+        order_index: currentFields.length + 1,
       },
     ]);
-    setSelectedFieldIndex(fields.length);
+    setSelectedFieldIndex(currentFields.length);
   }
 
   function reorder(targetIndex: number) {
     if (dragIndex === null || dragIndex === targetIndex) return;
-    const next = [...fields];
+    startEditingSelected();
+    const next = [...currentFields];
     const [removed] = next.splice(dragIndex, 1);
     next.splice(targetIndex, 0, removed);
     setFields(next.map((field, index) => ({ ...field, order_index: index + 1 })));
@@ -1208,20 +1381,23 @@ function FormsView({ forms, projects, onToast }: { forms: DynamicForm[]; project
     <div className="grid min-w-0 gap-6 2xl:grid-cols-[minmax(260px,300px)_minmax(0,1fr)_minmax(300px,340px)]">
       <aside className="brand-card min-w-0 p-5">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Biblioteca</h2>
-          <Button
-            tone="ghost"
-            onClick={() => {
-              setSelectedId("");
-              setName("Novo formulario");
-              setProjectId(projects[0]?.id ?? "");
-              setFields([]);
-              setSelectedFieldIndex(0);
-            }}
-          >
-            <Plus className="h-4 w-4" />
-          </Button>
+          <h2 className="text-lg font-semibold">{canManageForms ? "Biblioteca" : "Formularios"}</h2>
+          {canManageForms ? (
+            <Button
+              tone="ghost"
+              onClick={() => {
+                setSelectedId(newFormId);
+                setName("Novo formulario");
+                setProjectIds(projects[0] ? [projects[0].id] : []);
+                setFields([]);
+                setSelectedFieldIndex(0);
+              }}
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+          ) : null}
         </div>
+        {canManageForms ? (
         <div className="mt-4 grid gap-2">
           {[
             ["Texto curto", "text", FileText],
@@ -1235,17 +1411,18 @@ function FormsView({ forms, projects, onToast }: { forms: DynamicForm[]; project
               key={String(type)}
               type="button"
               onClick={() => {
-                setFields((current) => [
-                  ...current,
+                startEditingSelected();
+                setFields([
+                  ...currentFields,
                   {
                     label: String(label),
-                    field_key: `${String(type)}_${current.length + 1}`,
+                    field_key: `${String(type)}_${currentFields.length + 1}`,
                     field_type: String(type),
                     is_required: false,
-                    order_index: current.length + 1,
+                    order_index: currentFields.length + 1,
                   },
                 ]);
-                setSelectedFieldIndex(fields.length);
+                setSelectedFieldIndex(currentFields.length);
               }}
               className="flex min-w-0 items-center gap-3 rounded-lg border border-[#DCE7E3] bg-[#F8FBFA] p-3 text-left text-sm font-semibold text-[#10231F] transition hover:border-[#0A7354] hover:bg-white"
             >
@@ -1254,20 +1431,15 @@ function FormsView({ forms, projects, onToast }: { forms: DynamicForm[]; project
             </button>
           ))}
         </div>
-        <div className="mt-6 border-t border-[#DCE7E3] pt-4">
+        ) : null}
+        <div className={cx("border-t border-[#DCE7E3] pt-4", canManageForms ? "mt-6" : "mt-4")}>
           <p className="mb-3 text-xs font-bold uppercase tracking-[0.14em] text-[#64756F]">Formularios</p>
         <div className="mt-4 grid min-w-0 gap-3">
-          {forms.map((form) => (
+          {forms.length ? forms.map((form) => (
             <button
               key={form.id}
               type="button"
-              onClick={() => {
-                setSelectedId(form.id);
-                setFields([...form.fields].sort((a, b) => a.order_index - b.order_index));
-                setName(form.name);
-                setProjectId(form.project_id);
-                setSelectedFieldIndex(0);
-              }}
+              onClick={() => openForm(form)}
               className={cx(
                 "min-w-0 rounded-lg p-4 text-left transition",
                 selected?.id === form.id ? "brand-gradient text-white" : "bg-white hover:bg-[#F4F8F6]",
@@ -1278,7 +1450,9 @@ function FormsView({ forms, projects, onToast }: { forms: DynamicForm[]; project
                 v{form.current_version} - {form.status}
               </p>
             </button>
-          ))}
+          )) : (
+            <EmptyState icon={FormInput} title="Nenhum formulario disponivel" detail="Nao ha formularios cadastrados para visualizar." />
+          )}
         </div>
         </div>
       </aside>
@@ -1286,37 +1460,54 @@ function FormsView({ forms, projects, onToast }: { forms: DynamicForm[]; project
       <section className="brand-card min-w-0 p-5">
         <div className="mb-5 grid min-w-0 gap-3 md:grid-cols-2">
           <Field label="Nome do formulario">
-            <TextInput value={name} onChange={(event) => setName(event.target.value)} />
+            <TextInput
+              value={currentName}
+              onChange={(event) => {
+                startEditingSelected();
+                setName(event.target.value);
+              }}
+              disabled={!canManageForms}
+            />
           </Field>
-          <Field label="Projeto">
-            <Select value={projectId} onChange={(event) => setProjectId(event.target.value)}>
+          <Field label="Projetos (o formulario aparece em todos os selecionados)">
+            <div className="flex max-h-32 flex-col gap-1 overflow-auto rounded-lg border border-[#DCE7E3] bg-white p-2">
               {projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
+                <label key={project.id} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={currentProjectIds.includes(project.id)}
+                    disabled={!canManageForms}
+                    onChange={(event) => toggleFormProject(project.id, event.target.checked)}
+                  />
+                  <span className="min-w-0 truncate">{project.name}</span>
+                </label>
               ))}
-            </Select>
+            </div>
           </Field>
         </div>
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold">Builder dinamico</h2>
-            <p className="text-sm text-[#64756F]">Canvas do formulario com drag and drop, badges e microinteracoes.</p>
+            <h2 className="text-lg font-semibold">{canManageForms ? "Builder dinamico" : "Visualizacao do formulario"}</h2>
+            <p className="text-sm text-[#64756F]">
+              {canManageForms ? "Canvas do formulario com drag and drop, badges e microinteracoes." : "Campos e regras publicados para consulta."}
+            </p>
           </div>
-          <Button onClick={addField}>
-            <Plus className="h-4 w-4" />
-            Campo
-          </Button>
+          {canManageForms ? (
+            <Button onClick={addField}>
+              <Plus className="h-4 w-4" />
+              Campo
+            </Button>
+          ) : null}
         </div>
         <div className="grid min-w-0 gap-3">
           <AnimatePresence initial={false}>
-            {fields.map((field, index) => (
+            {currentFields.map((field, index) => (
               <motion.div
                 key={`${field.field_key}-${index}`}
-                draggable
-                onDragStart={() => setDragIndex(index)}
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={() => reorder(index)}
+                draggable={canManageForms}
+                onDragStart={() => canManageForms && setDragIndex(index)}
+                onDragOver={(event) => canManageForms && event.preventDefault()}
+                onDrop={() => canManageForms && reorder(index)}
                 initial={{ opacity: 0, scale: 0.98 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.98 }}
@@ -1329,16 +1520,20 @@ function FormsView({ forms, projects, onToast }: { forms: DynamicForm[]; project
                 <div className="grid min-w-0 gap-3 2xl:grid-cols-[minmax(0,1fr)_150px_130px_76px]">
                   <TextInput
                     value={field.label}
+                    disabled={!canManageForms}
                     onChange={(event) => {
-                      const next = [...fields];
+                      startEditingSelected();
+                      const next = [...currentFields];
                       next[index] = { ...field, label: event.target.value };
                       setFields(next);
                     }}
                   />
                   <Select
                     value={field.field_type}
+                    disabled={!canManageForms}
                     onChange={(event) => {
-                      const next = [...fields];
+                      startEditingSelected();
+                      const next = [...currentFields];
                       next[index] = { ...field, field_type: event.target.value };
                       setFields(next);
                     }}
@@ -1351,8 +1546,10 @@ function FormsView({ forms, projects, onToast }: { forms: DynamicForm[]; project
                   </Select>
                   <TextInput
                     value={field.field_key}
+                    disabled={!canManageForms}
                     onChange={(event) => {
-                      const next = [...fields];
+                      startEditingSelected();
+                      const next = [...currentFields];
                       next[index] = { ...field, field_key: event.target.value };
                       setFields(next);
                     }}
@@ -1361,8 +1558,10 @@ function FormsView({ forms, projects, onToast }: { forms: DynamicForm[]; project
                     <input
                       type="checkbox"
                       checked={field.is_required}
+                      disabled={!canManageForms}
                       onChange={(event) => {
-                        const next = [...fields];
+                        startEditingSelected();
+                        const next = [...currentFields];
                         next[index] = { ...field, is_required: event.target.checked };
                         setFields(next);
                       }}
@@ -1372,12 +1571,13 @@ function FormsView({ forms, projects, onToast }: { forms: DynamicForm[]; project
                 </div>
                 {field.conditional_logic ? (
                   <Badge tone="amber">Condicional</Badge>
-                ) : (
+                ) : canManageForms ? (
                   <button
                     type="button"
                     className="mt-3 text-xs font-semibold text-[#0A7354]"
                     onClick={() => {
-                      const next = [...fields];
+                      startEditingSelected();
+                      const next = [...currentFields];
                       next[index] = {
                         ...field,
                         conditional_logic: { field: "vestigio_identificado", operator: "equals", value: true },
@@ -1387,45 +1587,80 @@ function FormsView({ forms, projects, onToast }: { forms: DynamicForm[]; project
                   >
                     Adicionar regra condicional
                   </button>
-                )}
+                ) : null}
               </motion.div>
             ))}
           </AnimatePresence>
         </div>
-        <div className="mt-5 flex flex-wrap gap-3">
-          <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
-            <Save className="h-4 w-4" />
-            Salvar
-          </Button>
-          <Button tone="secondary" onClick={() => publishMutation.mutate()} disabled={!selected || publishMutation.isPending}>
-            <BadgeCheck className="h-4 w-4" />
-            Publicar
-          </Button>
-        </div>
+        {canManageForms ? (
+          <div className="mt-5 flex flex-wrap gap-3">
+            <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
+              <Save className="h-4 w-4" />
+              Salvar
+            </Button>
+            <Button tone="secondary" onClick={() => publishMutation.mutate()} disabled={!selected || publishMutation.isPending}>
+              <BadgeCheck className="h-4 w-4" />
+              Publicar
+            </Button>
+          </div>
+        ) : null}
       </section>
 
       <aside className="brand-card min-w-0 p-5">
         <h2 className="text-lg font-semibold">Propriedades</h2>
-        {fields[selectedFieldIndex] ? (
+        {currentFields[selectedFieldIndex] ? (
           <div className="mt-4 grid min-w-0 gap-3 rounded-lg border border-[#DCE7E3] bg-[#F8FBFA] p-4">
-            <p className="break-words text-sm font-semibold text-[#10231F]">{fields[selectedFieldIndex].label}</p>
-            <Badge tone={fields[selectedFieldIndex].is_required ? "red" : "neutral"}>
-              {fields[selectedFieldIndex].is_required ? "Obrigatorio" : "Opcional"}
+            <p className="break-words text-sm font-semibold text-[#10231F]">{currentFields[selectedFieldIndex].label}</p>
+            <Badge tone={currentFields[selectedFieldIndex].is_required ? "red" : "neutral"}>
+              {currentFields[selectedFieldIndex].is_required ? "Obrigatorio" : "Opcional"}
             </Badge>
-            <Badge tone={fields[selectedFieldIndex].field_type === "photo" || fields[selectedFieldIndex].field_type === "coordinate" ? "green" : "neutral"}>
-              {fields[selectedFieldIndex].field_type}
+            <Badge tone={currentFields[selectedFieldIndex].field_type === "photo" || currentFields[selectedFieldIndex].field_type === "coordinate" ? "green" : "neutral"}>
+              {currentFields[selectedFieldIndex].field_type}
             </Badge>
-            {fields[selectedFieldIndex].conditional_logic ? <Badge tone="amber">Condicional</Badge> : null}
+            {currentFields[selectedFieldIndex].conditional_logic ? <Badge tone="amber">Condicional</Badge> : null}
+            {canManageForms && (currentFields[selectedFieldIndex].field_type === "select" || currentFields[selectedFieldIndex].field_type === "multiselect") ? (
+              <Field label="Opcoes (uma por linha, 'valor = rotulo')">
+                <Textarea
+                  rows={6}
+                  value={choicesToText(readChoices(currentFields[selectedFieldIndex].options))}
+                  onChange={(event) => {
+                    startEditingSelected();
+                    const next = [...currentFields];
+                    const field = next[selectedFieldIndex];
+                    const prev = (field.options ?? {}) as Record<string, unknown>;
+                    next[selectedFieldIndex] = { ...field, options: { ...prev, choices: textToChoices(event.target.value) } };
+                    setFields(next);
+                  }}
+                />
+              </Field>
+            ) : null}
+            {canManageForms && currentFields[selectedFieldIndex].field_type === "photo" ? (
+              <label className="flex items-center gap-2 text-sm font-semibold">
+                <input
+                  type="checkbox"
+                  checked={Boolean((currentFields[selectedFieldIndex].options as { multiple?: boolean })?.multiple)}
+                  onChange={(event) => {
+                    startEditingSelected();
+                    const next = [...currentFields];
+                    const field = next[selectedFieldIndex];
+                    const prev = (field.options ?? {}) as Record<string, unknown>;
+                    next[selectedFieldIndex] = { ...field, options: { ...prev, multiple: event.target.checked } };
+                    setFields(next);
+                  }}
+                />
+                Permitir multiplas fotos
+              </label>
+            ) : null}
           </div>
         ) : (
           <EmptyState icon={FormInput} title="Nenhum campo selecionado" detail="Selecione um campo no canvas para editar suas propriedades." />
         )}
         <h2 className="mt-6 text-lg font-semibold">Preview</h2>
         <div className="mt-4 grid min-w-0 gap-3">
-          {fields.length === 0 ? (
+          {currentFields.length === 0 ? (
             <EmptyState icon={FormInput} title="Sem campos" detail="Adicione campos para visualizar o formulario." />
           ) : (
-            fields.map((field) => (
+            currentFields.map((field) => (
               <motion.div key={field.field_key} layout className="min-w-0 rounded-lg bg-[#F8FBFA] p-4">
                 <div className="mb-2 flex min-w-0 items-center justify-between gap-2">
                   <p className="min-w-0 break-words text-sm font-semibold">{field.label}</p>
@@ -1441,7 +1676,19 @@ function FormsView({ forms, projects, onToast }: { forms: DynamicForm[]; project
   );
 }
 
-function CollectionsView({ collections, projects, forms, onToast }: { collections: Collection[]; projects: Project[]; forms: DynamicForm[]; onToast: (toast: Omit<Toast, "id">) => void }) {
+function CollectionsView({
+  collections,
+  projects,
+  forms,
+  canReview,
+  onToast,
+}: {
+  collections: Collection[];
+  projects: Project[];
+  forms: DynamicForm[];
+  canReview: boolean;
+  onToast: (toast: Omit<Toast, "id">) => void;
+}) {
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(collections[0]?.id ?? null);
   const selected = collections.find((collection) => collection.id === selectedId) ?? collections[0] ?? null;
@@ -1462,14 +1709,14 @@ function CollectionsView({ collections, projects, forms, onToast }: { collection
             <p className="text-sm text-[#64756F]">Filtros visuais, status e exportacoes conectadas ao backend.</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <a className="premium-btn inline-flex min-h-10 items-center gap-2 rounded-lg bg-white px-4 text-sm font-semibold shadow-sm ring-1 ring-[#DCE7E3]" href={exportUrl("/exports/collections.xlsx")}>
+            <button type="button" className="premium-btn inline-flex min-h-10 items-center gap-2 rounded-lg bg-white px-4 text-sm font-semibold shadow-sm ring-1 ring-[#DCE7E3]" onClick={() => downloadExport("/exports/collections.xlsx", "coletas-arqueologia.xlsx")}>
               <FileSpreadsheet className="h-4 w-4" />
               Excel
-            </a>
-            <a className="premium-btn inline-flex min-h-10 items-center gap-2 rounded-lg bg-white px-4 text-sm font-semibold shadow-sm ring-1 ring-[#DCE7E3]" href={exportUrl("/exports/collections.kmz")}>
+            </button>
+            <button type="button" className="premium-btn inline-flex min-h-10 items-center gap-2 rounded-lg bg-white px-4 text-sm font-semibold shadow-sm ring-1 ring-[#DCE7E3]" onClick={() => downloadExport("/exports/collections.kmz", "coletas-arqueologia.kmz")}>
               <Download className="h-4 w-4" />
               KMZ
-            </a>
+            </button>
           </div>
         </div>
         {collections.length === 0 ? (
@@ -1560,14 +1807,16 @@ function CollectionsView({ collections, projects, forms, onToast }: { collection
               )}
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button onClick={() => reviewMutation.mutate(selected.id)} disabled={reviewMutation.isPending}>
-                <BadgeCheck className="h-4 w-4" />
-                Revisar
-              </Button>
-              <a className="premium-btn inline-flex min-h-10 items-center gap-2 rounded-lg bg-[#EAF4F0] px-4 text-sm font-semibold text-[#0A7354]" href={exportUrl(`/collections/${selected.id}/pdf`)}>
+              {canReview ? (
+                <Button onClick={() => reviewMutation.mutate(selected.id)} disabled={reviewMutation.isPending}>
+                  <BadgeCheck className="h-4 w-4" />
+                  Revisar
+                </Button>
+              ) : null}
+              <button type="button" className="premium-btn inline-flex min-h-10 items-center gap-2 rounded-lg bg-[#EAF4F0] px-4 text-sm font-semibold text-[#0A7354]" onClick={() => downloadExport(`/collections/${selected.id}/pdf`, `coleta-${selected.id}.pdf`)}>
                 <FileText className="h-4 w-4" />
                 PDF
-              </a>
+              </button>
             </div>
           </div>
         ) : (
@@ -1591,9 +1840,9 @@ function CollectionMap({ collections, projects, compact = false }: { collections
     if (!mapRef.current || leafletRef.current) return;
     leafletRef.current = L.map(mapRef.current, { zoomControl: false }).setView([-20.383, -43.503], 10);
     L.control.zoom({ position: "bottomright" }).addTo(leafletRef.current);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
       maxZoom: 19,
-      attribution: "&copy; OpenStreetMap",
+      attribution: "Imagens &copy; Esri",
     }).addTo(leafletRef.current);
     markerLayerRef.current = L.layerGroup().addTo(leafletRef.current);
   }, []);
@@ -1680,8 +1929,8 @@ function App() {
   const dataQueries = useQueries({
     queries: [
       { queryKey: ["projects"], queryFn: getProjects, enabled: Boolean(token) },
-      { queryKey: ["users"], queryFn: getUsers, enabled: Boolean(token && meQuery.data?.role.name === "admin") },
-      { queryKey: ["forms"], queryFn: getForms, enabled: Boolean(token) },
+      { queryKey: ["users"], queryFn: getUsers, enabled: Boolean(token) },
+      { queryKey: ["forms"], queryFn: getForms, enabled: Boolean(token && meQuery.data && canManageForms(meQuery.data)) },
       { queryKey: ["collections"], queryFn: getCollections, enabled: Boolean(token) },
     ],
   });
@@ -1690,20 +1939,22 @@ function App() {
   const users = (usersQuery.data ?? []) as User[];
   const forms = (formsQuery.data ?? []) as DynamicForm[];
   const collections = (collectionsQuery.data ?? []) as Collection[];
+  const me = meQuery.data;
+  const effectiveView: View = me && !canManageForms(me) && view === "forms" ? "dashboard" : view;
 
   const loading = useMemo(
-    () => Boolean(token && (meQuery.isLoading || projectsQuery.isLoading || formsQuery.isLoading || collectionsQuery.isLoading)),
-    [token, meQuery.isLoading, projectsQuery.isLoading, formsQuery.isLoading, collectionsQuery.isLoading],
+    () => Boolean(token && (meQuery.isLoading || projectsQuery.isLoading || usersQuery.isLoading || formsQuery.isLoading || collectionsQuery.isLoading)),
+    [token, meQuery.isLoading, projectsQuery.isLoading, usersQuery.isLoading, formsQuery.isLoading, collectionsQuery.isLoading],
   );
 
   if (!token) return <><LoginScreen onToast={addToast} /><Toasts items={toasts} /></>;
   if (meQuery.isError) return <><LoginScreen onToast={addToast} /><Toasts items={toasts} /></>;
-  if (!meQuery.data || loading) {
+  if (!me || loading) {
     return (
-      <main className="grid min-h-screen place-items-center bg-[#f4f1ea]">
+      <main className="grid min-h-screen place-items-center bg-[#F7F8F7]">
         <div className="text-center">
-          <Loader2 className="mx-auto h-8 w-8 animate-spin text-[#2f6f5e]" />
-          <p className="mt-3 text-sm font-semibold text-[#617169]">Carregando dados do sistema</p>
+          <Loader2 className="mx-auto h-8 w-8 animate-spin text-[#0A7354]" />
+          <p className="mt-3 text-sm font-medium text-[#687671]">Carregando dados do sistema</p>
         </div>
       </main>
     );
@@ -1711,13 +1962,28 @@ function App() {
 
   return (
     <>
-      <Shell view={view} setView={setView} me={meQuery.data}>
-        {view === "dashboard" && <Dashboard projects={projects} collections={collections} forms={forms} />}
-        {view === "users" && <UsersView users={users} projects={projects} forms={forms} onToast={addToast} />}
-        {view === "projects" && <ProjectsView projects={projects} onToast={addToast} />}
-        {view === "forms" && <FormsView forms={forms} projects={projects} onToast={addToast} />}
-        {view === "collections" && <CollectionsView collections={collections} projects={projects} forms={forms} onToast={addToast} />}
-        {view === "map" && <CollectionMap collections={collections} projects={projects} />}
+      <Shell view={effectiveView} setView={setView} me={me}>
+        {effectiveView === "dashboard" && (
+          <Dashboard projects={projects} collections={collections} forms={forms} canViewForms={canManageForms(me)} />
+        )}
+        {effectiveView === "users" && (
+          <UsersView
+            users={users}
+            projects={projects}
+            forms={forms}
+            canManageUsers={canManageSystem(me)}
+            canManageFormAccess={canManageForms(me)}
+            onToast={addToast}
+          />
+        )}
+        {effectiveView === "projects" && <ProjectsView projects={projects} canManageSystem={canManageSystem(me)} onToast={addToast} />}
+        {effectiveView === "forms" && canManageForms(me) && (
+          <FormsView forms={forms} projects={projects} canManageForms onToast={addToast} />
+        )}
+        {effectiveView === "collections" && (
+          <CollectionsView collections={collections} projects={projects} forms={forms} canReview={canReviewCollections(me)} onToast={addToast} />
+        )}
+        {effectiveView === "map" && <CollectionMap collections={collections} projects={projects} />}
       </Shell>
       <Toasts items={toasts} />
     </>

@@ -94,6 +94,18 @@ class UserForm(Base):
     form: Mapped["Form"] = relationship()
 
 
+class ProjectForm(Base):
+    __tablename__ = "project_forms"
+    __table_args__ = (UniqueConstraint("project_id", "form_id", name="uq_project_form"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False)
+    form_id: Mapped[str] = mapped_column(ForeignKey("forms.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    form: Mapped["Form"] = relationship(back_populates="project_links")
+
+
 class Section(Base, TimestampMixin):
     __tablename__ = "sections"
 
@@ -131,6 +143,14 @@ class Form(Base, TimestampMixin):
     project: Mapped[Project] = relationship(back_populates="forms")
     fields: Mapped[list["FormField"]] = relationship(back_populates="form", cascade="all, delete-orphan")
     versions: Mapped[list["FormVersion"]] = relationship(back_populates="form", cascade="all, delete-orphan")
+    project_links: Mapped[list["ProjectForm"]] = relationship(back_populates="form", cascade="all, delete-orphan")
+
+    @property
+    def project_ids(self) -> list[str]:
+        ids = {link.project_id for link in self.project_links}
+        if self.project_id:
+            ids.add(self.project_id)
+        return sorted(ids)
 
 
 class FormVersion(Base, TimestampMixin):

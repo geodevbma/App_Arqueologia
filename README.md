@@ -17,6 +17,13 @@ Monorepo com backend FastAPI, frontend React/Vite e aplicativo Flutter Android o
 
 O seed cria o projeto `Projeto de Acompanhamento Arqueologico Ramal Turistico Ouro Preto - Mariana`, os trechos/pontos informados e o `Formulario de Acompanhamento Arqueologico`.
 
+## Perfis e permissoes
+
+- `admin`: acesso completo ao sistema web e ao app.
+- `coordinator`: gerencia usuarios, projetos, trechos, pontos e coletas no sistema; nao cria/edita/publica formularios; no app pode enviar e editar coletas.
+- `archaeologist`: consulta o sistema web sem criar, editar ou excluir; no app envia coletas e edita apenas os proprios registros; nao exclui.
+- `viewer`: acesso somente leitura.
+
 ## Backend
 
 ```powershell

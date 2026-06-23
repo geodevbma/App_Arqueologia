@@ -8,8 +8,31 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from reportlab.lib import colors
+from reportlab.lib.utils import ImageReader
 
 from app.models.entities import Collection
+
+
+PHOTO_MAX_WIDTH = 320
+
+
+def _photo_flowable(file_path: str):
+    """Retorna um Image redimensionado se o arquivo existir no servidor, senao None."""
+    if not file_path:
+        return None
+    path = Path(file_path)
+    if not path.is_file():
+        return None
+    try:
+        reader = ImageReader(str(path))
+        src_w, src_h = reader.getSize()
+        if not src_w or not src_h:
+            return None
+        width = min(PHOTO_MAX_WIDTH, src_w)
+        height = width * src_h / src_w
+        return Image(str(path), width=width, height=height)
+    except Exception:
+        return None
 
 
 def _answer_map(collection: Collection) -> dict[str, object]:
@@ -120,6 +143,13 @@ def build_collection_pdf(collection: Collection) -> bytes:
     if collection.photos:
         for photo in collection.photos:
             story.append(Paragraph(f"{photo.photo_type}: {photo.original_filename or photo.file_path}", styles["BodyText"]))
+            image = _photo_flowable(photo.file_path)
+            if image is not None:
+                story.append(Spacer(1, 4))
+                story.append(image)
+            else:
+                story.append(Paragraph("(imagem ainda nao sincronizada para o servidor)", styles["Italic"]))
+            story.append(Spacer(1, 10))
     else:
         story.append(Paragraph("Nenhuma foto vinculada a esta coleta.", styles["BodyText"]))
     story.extend([Spacer(1, 14), Paragraph(f"Gerado em {datetime.utcnow().isoformat()} UTC", styles["Italic"])])
