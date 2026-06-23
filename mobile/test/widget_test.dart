@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:mobile/main.dart';
+import 'package:mobile/widgets/status_banner.dart';
 
 void main() {
   testWidgets('renders reusable status banner', (WidgetTester tester) async {

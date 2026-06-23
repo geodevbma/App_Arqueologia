@@ -1,0 +1,3 @@
+﻿id;demanda;contrato;codigo_os_brandt;tipo_feicao;qr_code;nome_ponto_gps;status;sincronizado;latitude;longitude;cavidade;desenvolvimento_linear;desenvolvimento_horizontal;desnivel;estado_conservacao
+3;Prospeccao Espeleologica Dom Bosco;Gerdau Acominas S.A - 4600550143;1GASA068;Cavidade teste off;0002732;teste;pendente;sim;-19.9823986;-43.9440938;;;;;
+1;Prospeccao Espeleologica Dom Bosco;Gerdau Acominas S.A - 4600550143;1GASA068;Cavidade;0002548;ed0429920;concluido;sim;-20.12345;-43.12345;Cavidade 0002548;4.8;4.1;1.2;Pouco alterado

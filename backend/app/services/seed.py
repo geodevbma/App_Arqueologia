@@ -8,6 +8,7 @@ from app.models.entities import Form, FormField, FormVersion, Project, ProjectUs
 
 PROJECT_NAME = "Projeto de Acompanhamento Arqueologico Ramal Turistico Ouro Preto - Mariana"
 FORM_NAME = "Formulario de Acompanhamento Arqueologico"
+POCO_TESTE_FORM_NAME = "Poço teste"
 
 SECTIONS = {
     "Trecho 01": ["000+800", "001+850", "002+300", "003+925", "006+800"],
@@ -196,9 +197,34 @@ def seed_initial_data(db: Session) -> None:
             )
         )
 
+    # "Poço teste" form. The mobile app renders this form natively (it does not
+    # rely on these backend field definitions), so it is published with an empty
+    # field set. The record exists so it can be linked to users, returned by the
+    # bootstrap and used for synchronization.
+    poco_form = db.query(Form).filter_by(project_id=project.id, name=POCO_TESTE_FORM_NAME).first()
+    if not poco_form:
+        poco_form = Form(
+            project_id=project.id,
+            name=POCO_TESTE_FORM_NAME,
+            description="Ficha de poço teste (sondagem) preenchida nativamente no aplicativo mobile.",
+            status="published",
+            current_version=1,
+        )
+        db.add(poco_form)
+        db.flush()
+        db.add(
+            FormVersion(
+                form_id=poco_form.id,
+                version=1,
+                status="published",
+                schema_snapshot={"name": POCO_TESTE_FORM_NAME, "native": True, "fields": []},
+            )
+        )
+
     for user in seeded_users:
-        linked_form = db.query(UserForm).filter_by(user_id=user.id, form_id=form.id).first()
-        if not linked_form:
-            db.add(UserForm(user_id=user.id, form_id=form.id))
+        for linked in (form, poco_form):
+            linked_form = db.query(UserForm).filter_by(user_id=user.id, form_id=linked.id).first()
+            if not linked_form:
+                db.add(UserForm(user_id=user.id, form_id=linked.id))
 
     db.commit()
