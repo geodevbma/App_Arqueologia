@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'app_router.dart';
+import 'auto_sync_scope.dart';
 import 'theme.dart';
 
 class BrandtApp extends StatelessWidget {
@@ -13,6 +14,8 @@ class BrandtApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       routerConfig: createAppRouter(),
       theme: buildBrandtTheme(),
+      builder: (context, child) =>
+          AutoSyncScope(child: child ?? const SizedBox.shrink()),
     );
   }
 }

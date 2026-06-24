@@ -76,6 +76,21 @@ class PocoTestePhoto {
     'upload_status': uploadStatus,
   };
 
+  /// Parses a list of photos. Accepts either a JSON list of photo maps or a
+  /// single photo map (backward compatibility with the old single-photo
+  /// payload), returning an empty list when there is nothing to parse.
+  static List<PocoTestePhoto> listFromJson(Object? raw) {
+    if (raw == null) return const [];
+    if (raw is List) {
+      return raw
+          .map(PocoTestePhoto.fromJson)
+          .whereType<PocoTestePhoto>()
+          .toList();
+    }
+    final single = PocoTestePhoto.fromJson(raw);
+    return single == null ? const [] : [single];
+  }
+
   static PocoTestePhoto? fromJson(Object? raw) {
     if (raw == null) return null;
     final json = Map<String, dynamic>.from(raw as Map);

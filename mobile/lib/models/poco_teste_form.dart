@@ -48,7 +48,7 @@ class PocoTesteHeader {
 /// Superfície (surface) section state.
 class PocoTesteSurface {
   const PocoTesteSurface({
-    this.fotoSuperficie,
+    this.fotoSuperficie = const [],
     this.coberturaVegetacional = const [],
     this.outroCobertura = '',
     this.solo,
@@ -58,10 +58,10 @@ class PocoTesteSurface {
     this.outroHistorico = '',
     this.preColonial = const [],
     this.outroPreColonial = '',
-    this.fotoMaterial,
+    this.fotoMaterial = const [],
   });
 
-  final PocoTestePhoto? fotoSuperficie;
+  final List<PocoTestePhoto> fotoSuperficie;
   final List<String> coberturaVegetacional;
   final String outroCobertura;
   final String? solo;
@@ -71,7 +71,7 @@ class PocoTesteSurface {
   final String outroHistorico;
   final List<String> preColonial;
   final String outroPreColonial;
-  final PocoTestePhoto? fotoMaterial;
+  final List<PocoTestePhoto> fotoMaterial;
 
   bool get showOutroCobertura =>
       coberturaVegetacional.contains(PocoTesteChoices.outro);
@@ -85,8 +85,7 @@ class PocoTesteSurface {
   bool get showOutroPreColonial => preColonial.contains(PocoTesteChoices.outro);
 
   PocoTesteSurface copyWith({
-    PocoTestePhoto? fotoSuperficie,
-    bool clearFotoSuperficie = false,
+    List<PocoTestePhoto>? fotoSuperficie,
     List<String>? coberturaVegetacional,
     String? outroCobertura,
     String? solo,
@@ -97,13 +96,10 @@ class PocoTesteSurface {
     String? outroHistorico,
     List<String>? preColonial,
     String? outroPreColonial,
-    PocoTestePhoto? fotoMaterial,
-    bool clearFotoMaterial = false,
+    List<PocoTestePhoto>? fotoMaterial,
   }) {
     return PocoTesteSurface(
-      fotoSuperficie: clearFotoSuperficie
-          ? null
-          : (fotoSuperficie ?? this.fotoSuperficie),
+      fotoSuperficie: fotoSuperficie ?? this.fotoSuperficie,
       coberturaVegetacional:
           coberturaVegetacional ?? this.coberturaVegetacional,
       outroCobertura: outroCobertura ?? this.outroCobertura,
@@ -114,15 +110,13 @@ class PocoTesteSurface {
       outroHistorico: outroHistorico ?? this.outroHistorico,
       preColonial: preColonial ?? this.preColonial,
       outroPreColonial: outroPreColonial ?? this.outroPreColonial,
-      fotoMaterial: clearFotoMaterial
-          ? null
-          : (fotoMaterial ?? this.fotoMaterial),
+      fotoMaterial: fotoMaterial ?? this.fotoMaterial,
     );
   }
 
   Map<String, dynamic> toJson() {
     return {
-      'foto_superficie': fotoSuperficie?.toJson(),
+      'foto_superficie': fotoSuperficie.map((p) => p.toJson()).toList(),
       'cobertura_vegetacional': coberturaVegetacional,
       'outro_cobertura_vegetacional': showOutroCobertura
           ? _nullIfEmpty(outroCobertura)
@@ -138,13 +132,15 @@ class PocoTesteSurface {
       'outro_pre_colonial': hasMaterial && showOutroPreColonial
           ? _nullIfEmpty(outroPreColonial)
           : null,
-      'foto_material': hasMaterial ? fotoMaterial?.toJson() : null,
+      'foto_material': hasMaterial
+          ? fotoMaterial.map((p) => p.toJson()).toList()
+          : <dynamic>[],
     };
   }
 
   static PocoTesteSurface fromJson(Map<String, dynamic> json) {
     return PocoTesteSurface(
-      fotoSuperficie: PocoTestePhoto.fromJson(json['foto_superficie']),
+      fotoSuperficie: PocoTestePhoto.listFromJson(json['foto_superficie']),
       coberturaVegetacional: _stringList(json['cobertura_vegetacional']),
       outroCobertura: json['outro_cobertura_vegetacional'] as String? ?? '',
       solo: json['solo'] as String?,
@@ -154,7 +150,7 @@ class PocoTesteSurface {
       outroHistorico: json['outro_historico'] as String? ?? '',
       preColonial: _stringList(json['pre_colonial']),
       outroPreColonial: json['outro_pre_colonial'] as String? ?? '',
-      fotoMaterial: PocoTestePhoto.fromJson(json['foto_material']),
+      fotoMaterial: PocoTestePhoto.listFromJson(json['foto_material']),
     );
   }
 

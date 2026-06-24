@@ -138,8 +138,8 @@ class CollectionDetailScreen extends StatelessWidget {
           ),
         ]),
         _photoStrip('Fotos da superfície', [
-          PocoTestePhoto.fromJson(surface['foto_superficie']),
-          PocoTestePhoto.fromJson(surface['foto_material']),
+          ...PocoTestePhoto.listFromJson(surface['foto_superficie']),
+          ...PocoTestePhoto.listFromJson(surface['foto_material']),
         ]),
         for (final level in levels) _levelCard(level),
       ],
@@ -195,11 +195,11 @@ class CollectionDetailScreen extends StatelessWidget {
           ),
         ),
       _photoStrip('Fotos', [
-        PocoTestePhoto.fromJson(level['foto_abertura_pt']),
-        PocoTestePhoto.fromJson(level['foto_material']),
-        PocoTestePhoto.fromJson(level['foto_solo']),
-        PocoTestePhoto.fromJson(level['foto_peneira']),
-        PocoTestePhoto.fromJson(level['foto_finalizacao']),
+        ...PocoTestePhoto.listFromJson(level['foto_abertura_pt']),
+        ...PocoTestePhoto.listFromJson(level['foto_material']),
+        ...PocoTestePhoto.listFromJson(level['foto_solo']),
+        ...PocoTestePhoto.listFromJson(level['foto_peneira']),
+        ...PocoTestePhoto.listFromJson(level['foto_finalizacao']),
       ]),
     ]);
   }

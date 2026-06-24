@@ -5,29 +5,44 @@ import 'package:path/path.dart' as p;
 
 import '../models/poco_teste_geo.dart';
 import '../models/poco_teste_photo.dart';
+import 'watermark_service.dart';
 
-/// Opens the camera and builds a [PocoTestePhoto] with capture metadata.
+/// Opens the camera or the gallery, burns a date/time + UTM watermark into the
+/// resulting image and builds a [PocoTestePhoto] with capture metadata.
 ///
-/// Keeps the same camera settings as the legacy collection form (quality 74,
+/// Keeps the same image settings as the legacy collection form (quality 74,
 /// max width 1600) so behavior stays consistent across the app.
 class PhotoCaptureService {
-  PhotoCaptureService({ImagePicker? picker})
-    : _picker = picker ?? ImagePicker();
+  PhotoCaptureService({ImagePicker? picker, WatermarkService? watermark})
+    : _picker = picker ?? ImagePicker(),
+      _watermark = watermark ?? const WatermarkService();
 
   final ImagePicker _picker;
+  final WatermarkService _watermark;
 
   Future<PocoTestePhoto?> capture({
     required String type,
+    ImageSource source = ImageSource.camera,
     String? fieldName,
     int? levelIndex,
     GeoPoint geo = const GeoPoint(),
   }) async {
     final image = await _picker.pickImage(
-      source: ImageSource.camera,
+      source: source,
       imageQuality: 74,
       maxWidth: 1600,
     );
     if (image == null) return null;
+
+    final capturedAt = DateTime.now();
+    await _watermark.apply(
+      image.path,
+      latitude: geo.latitude,
+      longitude: geo.longitude,
+      accuracy: geo.accuracy,
+      capturedAt: capturedAt,
+    );
+
     int? size;
     try {
       size = await File(image.path).length();
@@ -43,7 +58,7 @@ class PhotoCaptureService {
       latitude: geo.latitude,
       longitude: geo.longitude,
       accuracy: geo.accuracy,
-      capturedAt: DateTime.now().toIso8601String(),
+      capturedAt: capturedAt.toIso8601String(),
       fileSize: size,
     );
   }

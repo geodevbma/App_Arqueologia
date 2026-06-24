@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../app/theme.dart';
 import '../../models/poco_teste_choices.dart';
@@ -37,8 +38,21 @@ class PocoTesteLevelCard extends StatelessWidget {
   /// Null when removal is not allowed (single level remaining).
   final VoidCallback? onRemove;
 
-  /// Captures a photo of [type] and returns its metadata (or null if canceled).
-  final Future<PocoTestePhoto?> Function(String type) capturePhoto;
+  /// Captures a photo of [type] from [source] and returns its metadata
+  /// (or null if canceled).
+  final Future<PocoTestePhoto?> Function(String type, ImageSource source)
+  capturePhoto;
+
+  /// Appends [source]-captured photo of [type] to [current] via [apply].
+  Future<void> _addPhoto(
+    String type,
+    ImageSource source,
+    List<PocoTestePhoto> current,
+    PocoTesteLevel Function(List<PocoTestePhoto>) apply,
+  ) async {
+    final photo = await capturePhoto(type, source);
+    if (photo != null) onChanged(apply([...current, photo]));
+  }
 
   String? _err(String field) => errors[field];
 
@@ -133,14 +147,17 @@ class PocoTesteLevelCard extends StatelessWidget {
       widgets.add(
         BrandtPhotoField(
           label: 'Foto de abertura do PT',
-          photo: level.fotoAberturaPt,
+          photos: level.fotoAberturaPt,
           errorText: _err('foto_abertura_pt'),
-          onCapture: () async {
-            final photo = await capturePhoto('foto_abertura_pt');
-            if (photo != null) {
-              onChanged(level.copyWith(fotoAberturaPt: photo));
-            }
-          },
+          onAdd: (source) => _addPhoto(
+            'foto_abertura_pt',
+            source,
+            level.fotoAberturaPt,
+            (list) => level.copyWith(fotoAberturaPt: list),
+          ),
+          onRemove: (i) => onChanged(
+            level.copyWith(fotoAberturaPt: [...level.fotoAberturaPt]..removeAt(i)),
+          ),
         ),
       );
       gap();
@@ -288,12 +305,17 @@ class PocoTesteLevelCard extends StatelessWidget {
       widgets.add(
         BrandtPhotoField(
           label: 'Foto do material/estrutura arqueológico',
-          photo: level.fotoMaterial,
+          photos: level.fotoMaterial,
           errorText: _err('foto_material'),
-          onCapture: () async {
-            final photo = await capturePhoto('foto_material');
-            if (photo != null) onChanged(level.copyWith(fotoMaterial: photo));
-          },
+          onAdd: (source) => _addPhoto(
+            'foto_material_nivel',
+            source,
+            level.fotoMaterial,
+            (list) => level.copyWith(fotoMaterial: list),
+          ),
+          onRemove: (i) => onChanged(
+            level.copyWith(fotoMaterial: [...level.fotoMaterial]..removeAt(i)),
+          ),
         ),
       );
       gap();
@@ -312,24 +334,33 @@ class PocoTesteLevelCard extends StatelessWidget {
     widgets.add(
       BrandtPhotoField(
         label: 'Foto do solo',
-        photo: level.fotoSolo,
+        photos: level.fotoSolo,
         errorText: _err('foto_solo'),
-        onCapture: () async {
-          final photo = await capturePhoto('foto_solo');
-          if (photo != null) onChanged(level.copyWith(fotoSolo: photo));
-        },
+        onAdd: (source) => _addPhoto(
+          'foto_solo',
+          source,
+          level.fotoSolo,
+          (list) => level.copyWith(fotoSolo: list),
+        ),
+        onRemove: (i) =>
+            onChanged(level.copyWith(fotoSolo: [...level.fotoSolo]..removeAt(i))),
       ),
     );
     gap();
     widgets.add(
       BrandtPhotoField(
         label: 'Foto da peneira',
-        photo: level.fotoPeneira,
+        photos: level.fotoPeneira,
         errorText: _err('foto_peneira'),
-        onCapture: () async {
-          final photo = await capturePhoto('foto_peneira');
-          if (photo != null) onChanged(level.copyWith(fotoPeneira: photo));
-        },
+        onAdd: (source) => _addPhoto(
+          'foto_peneira',
+          source,
+          level.fotoPeneira,
+          (list) => level.copyWith(fotoPeneira: list),
+        ),
+        onRemove: (i) => onChanged(
+          level.copyWith(fotoPeneira: [...level.fotoPeneira]..removeAt(i)),
+        ),
       ),
     );
     gap();
@@ -393,14 +424,19 @@ class PocoTesteLevelCard extends StatelessWidget {
       widgets.add(
         BrandtPhotoField(
           label: 'Foto de finalização (com escala e trena)',
-          photo: level.fotoFinalizacao,
+          photos: level.fotoFinalizacao,
           errorText: _err('foto_finalizacao'),
-          onCapture: () async {
-            final photo = await capturePhoto('foto_finalizacao');
-            if (photo != null) {
-              onChanged(level.copyWith(fotoFinalizacao: photo));
-            }
-          },
+          onAdd: (source) => _addPhoto(
+            'foto_finalizacao',
+            source,
+            level.fotoFinalizacao,
+            (list) => level.copyWith(fotoFinalizacao: list),
+          ),
+          onRemove: (i) => onChanged(
+            level.copyWith(
+              fotoFinalizacao: [...level.fotoFinalizacao]..removeAt(i),
+            ),
+          ),
         ),
       );
     }

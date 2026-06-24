@@ -4,12 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
 
 import '../app/theme.dart';
 import '../core/photo_capture_service.dart';
 import '../core/providers.dart';
+import '../core/sync_service.dart';
 import '../models/poco_teste_choices.dart';
 import '../models/poco_teste_form.dart';
 import '../models/poco_teste_level.dart';
@@ -247,12 +249,14 @@ class _PocoTesteFormScreenState extends ConsumerState<PocoTesteFormScreen> {
   }
 
   Future<PocoTestePhoto?> _capturePhoto(
-    String type, {
+    String type,
+    ImageSource source, {
     String? fieldName,
     int? levelIndex,
   }) {
     return _capture.capture(
       type: type,
+      source: source,
       fieldName: fieldName ?? type,
       levelIndex: levelIndex,
       geo: _state.header.coordenada,
@@ -306,6 +310,8 @@ class _PocoTesteFormScreenState extends ConsumerState<PocoTesteFormScreen> {
       return;
     }
     await _persist('pending_sync');
+    // Tenta sincronizar imediatamente (best-effort) se houver internet.
+    unawaited(ref.read(syncServiceProvider).trigger());
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -576,12 +582,19 @@ class _PocoTesteFormScreenState extends ConsumerState<PocoTesteFormScreen> {
         PremiumCard(
           child: BrandtPhotoField(
             label: 'Foto da Superfície',
-            photo: s.fotoSuperficie,
+            photos: s.fotoSuperficie,
             errorText: _surfaceErr('foto_superficie'),
-            onCapture: () async {
-              final photo = await _capturePhoto('foto_superficie');
-              if (photo != null) _setSurface(s.copyWith(fotoSuperficie: photo));
+            onAdd: (source) async {
+              final photo = await _capturePhoto('foto_superficie', source);
+              if (photo != null) {
+                _setSurface(
+                  s.copyWith(fotoSuperficie: [...s.fotoSuperficie, photo]),
+                );
+              }
             },
+            onRemove: (i) => _setSurface(
+              s.copyWith(fotoSuperficie: [...s.fotoSuperficie]..removeAt(i)),
+            ),
           ),
         ),
         PremiumCard(
@@ -683,16 +696,22 @@ class _PocoTesteFormScreenState extends ConsumerState<PocoTesteFormScreen> {
                 const SizedBox(height: 14),
                 BrandtPhotoField(
                   label: 'Foto do material/estrutura arqueológico',
-                  photo: s.fotoMaterial,
+                  photos: s.fotoMaterial,
                   errorText: _surfaceErr('foto_material'),
-                  onCapture: () async {
+                  onAdd: (source) async {
                     final photo = await _capturePhoto(
                       'foto_material_superficie',
+                      source,
                     );
                     if (photo != null) {
-                      _setSurface(s.copyWith(fotoMaterial: photo));
+                      _setSurface(
+                        s.copyWith(fotoMaterial: [...s.fotoMaterial, photo]),
+                      );
                     }
                   },
+                  onRemove: (i) => _setSurface(
+                    s.copyWith(fotoMaterial: [...s.fotoMaterial]..removeAt(i)),
+                  ),
                 ),
               ],
             ],
@@ -727,8 +746,8 @@ class _PocoTesteFormScreenState extends ConsumerState<PocoTesteFormScreen> {
               if (!_expandedLevels.remove(id)) _expandedLevels.add(id);
             }),
             onRemove: _state.levels.length > 1 ? () => _removeLevel(i) : null,
-            capturePhoto: (type) =>
-                _capturePhoto(type, fieldName: type, levelIndex: i + 1),
+            capturePhoto: (type, source) =>
+                _capturePhoto(type, source, fieldName: type, levelIndex: i + 1),
           ),
         const SizedBox(height: 8),
         OutlinedButton.icon(

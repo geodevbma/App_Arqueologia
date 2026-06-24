@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
@@ -9,6 +10,12 @@ class LocalStore {
   static final LocalStore instance = LocalStore._();
 
   late Database db;
+
+  /// Increments on every write to the `collections` table so the UI can react
+  /// to changes (new collection, draft update, marked as synced) immediately.
+  final ValueNotifier<int> collectionsRevision = ValueNotifier<int>(0);
+
+  void _bumpCollections() => collectionsRevision.value++;
 
   Future<void> init() async {
     final dbPath = p.join(await getDatabasesPath(), 'brandt_arqueologia.db');
@@ -213,6 +220,7 @@ class LocalStore {
       'status': payload['status'] ?? payload['sync_status'],
       'created_at': createdAt,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
+    _bumpCollections();
   }
 
   Future<List<Map<String, dynamic>>> collections({
@@ -259,5 +267,6 @@ class LocalStore {
       where: 'local_uuid = ?',
       whereArgs: [localUuid],
     );
+    _bumpCollections();
   }
 }

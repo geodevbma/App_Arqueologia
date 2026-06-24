@@ -1,4 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mobile/core/utm.dart';
+import 'package:mobile/core/watermark_service.dart';
 import 'package:mobile/models/form_choice.dart';
 import 'package:mobile/models/poco_teste_choices.dart';
 import 'package:mobile/models/poco_teste_form.dart';
@@ -24,19 +26,19 @@ PocoTesteHeader _validHeader() => const PocoTesteHeader(
 );
 
 PocoTesteLevel _validFinalLevel() => PocoTesteLevel(
-  fotoAberturaPt: _photo('foto_abertura_pt'),
+  fotoAberturaPt: [_photo('foto_abertura_pt')],
   coloracao: 'marrom',
   compactacao: 'media',
   umidade: 'baixa',
   textura: 'argilosa',
   soloCaracteristica: const ['raizes'],
   materialPresenca: PocoTesteChoices.nao,
-  fotoSolo: _photo('foto_solo'),
-  fotoPeneira: _photo('foto_peneira'),
+  fotoSolo: [_photo('foto_solo')],
+  fotoPeneira: [_photo('foto_peneira')],
   justificativa: PocoTesteChoices.atingiu1,
   profundidade: '100',
   positivo: PocoTesteChoices.nao,
-  fotoFinalizacao: _photo('foto_finalizacao'),
+  fotoFinalizacao: [_photo('foto_finalizacao')],
 );
 
 PocoTesteFormState _state({
@@ -50,7 +52,7 @@ PocoTesteFormState _state({
   surface:
       surface ??
       PocoTesteSurface(
-        fotoSuperficie: _photo('foto_superficie'),
+        fotoSuperficie: [_photo('foto_superficie')],
         materialPresenca: PocoTesteChoices.nao,
       ),
   levels: levels ?? [_validFinalLevel()],
@@ -120,7 +122,7 @@ void main() {
     test('level 1 without opening photo fails', () {
       final result = validator.validateForFinalize(
         _state(
-          levels: [_validFinalLevel().copyWith(clearFotoAberturaPt: true)],
+          levels: [_validFinalLevel().copyWith(fotoAberturaPt: const [])],
         ),
       );
       expect(
@@ -133,7 +135,7 @@ void main() {
       final result = validator.validateForFinalize(
         _state(
           surface: PocoTesteSurface(
-            fotoSuperficie: _photo('foto_superficie'),
+            fotoSuperficie: [_photo('foto_superficie')],
             materialPresenca: PocoTesteChoices.nao,
             coberturaVegetacional: const [PocoTesteChoices.outro],
           ),
@@ -146,7 +148,7 @@ void main() {
       final result = validator.validateForFinalize(
         _state(
           surface: PocoTesteSurface(
-            fotoSuperficie: _photo('foto_superficie'),
+            fotoSuperficie: [_photo('foto_superficie')],
             materialPresenca: PocoTesteChoices.nao,
             solo: PocoTesteChoices.outro,
           ),
@@ -159,7 +161,7 @@ void main() {
       final result = validator.validateForFinalize(
         _state(
           surface: PocoTesteSurface(
-            fotoSuperficie: _photo('foto_superficie'),
+            fotoSuperficie: [_photo('foto_superficie')],
             materialPresenca: PocoTesteChoices.sim,
             historico: const ['vidro'],
           ),
@@ -172,7 +174,7 @@ void main() {
       final level = _validFinalLevel().copyWith(
         materialPresenca: PocoTesteChoices.sim,
         historico: const ['vidro'],
-        fotoMaterial: _photo('foto_material'),
+        fotoMaterial: [_photo('foto_material')],
       );
       final result = validator.validateForFinalize(_state(levels: [level]));
       expect(
@@ -193,7 +195,7 @@ void main() {
     });
 
     test('finalization without foto_finalizacao fails', () {
-      final level = _validFinalLevel().copyWith(clearFotoFinalizacao: true);
+      final level = _validFinalLevel().copyWith(fotoFinalizacao: const []);
       final result = validator.validateForFinalize(_state(levels: [level]));
       expect(
         result.errors.any((e) => e.field == 'nivel_1_foto_finalizacao'),
@@ -237,20 +239,22 @@ void main() {
         expect((payload['niveis'] as List).length, 2);
 
         final surface = payload['superficie'] as Map;
-        expect((surface['foto_superficie'] as Map)['type'], 'foto_superficie');
+        final surfacePhotos = surface['foto_superficie'] as List;
+        expect((surfacePhotos.first as Map)['type'], 'foto_superficie');
 
         final level1 = (payload['niveis'] as List).first as Map;
         expect(level1['index'], 1);
-        expect((level1['foto_solo'] as Map)['type'], 'foto_solo');
-        // Surface and level photos must not collide.
-        expect(surface['foto_material'], isNull);
+        final soloPhotos = level1['foto_solo'] as List;
+        expect((soloPhotos.first as Map)['type'], 'foto_solo');
+        // No material on surface -> empty photo list (not a colliding object).
+        expect(surface['foto_material'], isEmpty);
       },
     );
 
     test('omits hidden conditional fields from payload', () {
       final state = _state(
         surface: PocoTesteSurface(
-          fotoSuperficie: _photo('foto_superficie'),
+          fotoSuperficie: [_photo('foto_superficie')],
           materialPresenca: PocoTesteChoices.nao,
           // historico set but material is "nao" -> must be cleared.
           historico: const ['vidro'],
@@ -286,6 +290,41 @@ void main() {
       final levelPhotos = photos.where((p) => p.levelIndex == 1).toList();
       expect(levelPhotos, isNotEmpty);
       expect(photos.any((p) => p.type == 'foto_superficie'), isTrue);
+    });
+  });
+
+  group('latLonToUtm', () {
+    test('converts a Minas Gerais coordinate to zone 23K', () {
+      final utm = latLonToUtm(-19.9, -43.9);
+      expect(utm, startsWith('23K '));
+      expect(utm, contains('mE'));
+      expect(utm, contains('mN'));
+    });
+
+    test('northern hemisphere keeps northing below 10,000,000', () {
+      final utm = latLonToUtm(48.8566, 2.3522); // Paris ~ 31U
+      expect(utm, startsWith('31U '));
+    });
+  });
+
+  group('WatermarkService.buildLines', () {
+    final when = DateTime(2026, 6, 23, 14, 5, 9);
+
+    test('includes date/time and UTM when coordinates are present', () {
+      final lines = WatermarkService.buildLines(
+        latitude: -19.9,
+        longitude: -43.9,
+        accuracy: 5,
+        capturedAt: when,
+      );
+      expect(lines.first, '23/06/2026 14:05:09');
+      expect(lines.any((l) => l.startsWith('23K ')), isTrue);
+      expect(lines.any((l) => l.contains('+-5m')), isTrue);
+    });
+
+    test('falls back to a no-GPS message without coordinates', () {
+      final lines = WatermarkService.buildLines(capturedAt: when);
+      expect(lines, contains('Sem coordenada GPS'));
     });
   });
 }

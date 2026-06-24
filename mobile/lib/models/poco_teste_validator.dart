@@ -82,7 +82,7 @@ class PocoTesteValidator {
       ValidationError(section: 'superficie', field: field, message: message),
     );
 
-    if (s.fotoSuperficie == null) {
+    if (s.fotoSuperficie.isEmpty) {
       add('foto_superficie', 'A foto da superfície é obrigatória.');
     }
     if (s.showOutroCobertura && s.outroCobertura.trim().isEmpty) {
@@ -104,7 +104,7 @@ class PocoTesteValidator {
           'Selecione ao menos uma opção em histórico ou pré-colonial.',
         );
       }
-      if (s.fotoMaterial == null) {
+      if (s.fotoMaterial.isEmpty) {
         add('foto_material', 'A foto do material arqueológico é obrigatória.');
       }
       if (s.showOutroHistorico && s.outroHistorico.trim().isEmpty) {
@@ -140,7 +140,7 @@ class PocoTesteValidator {
       );
 
       if (PocoTesteLevel.showFotoAberturaPt(position) &&
-          level.fotoAberturaPt == null) {
+          level.fotoAberturaPt.isEmpty) {
         add('foto_abertura_pt', 'foto de abertura do PT é obrigatória.');
       }
       if (level.coloracao == null) {
@@ -163,14 +163,14 @@ class PocoTesteValidator {
       if (level.materialPresenca == null) {
         add('material_presenca', 'informe a presença de material.');
       }
-      if (level.fotoSolo == null) {
+      if (level.fotoSolo.isEmpty) {
         add('foto_solo', 'a foto do solo é obrigatória.');
       }
-      if (level.fotoPeneira == null) {
+      if (level.fotoPeneira.isEmpty) {
         add('foto_peneira', 'a foto da peneira é obrigatória.');
       }
       if (level.hasMaterial) {
-        if (level.fotoMaterial == null) {
+        if (level.fotoMaterial.isEmpty) {
           add('foto_material', 'a foto do material é obrigatória.');
         }
         if (level.profundidadeMaterial.trim().isEmpty) {
@@ -201,7 +201,7 @@ class PocoTesteValidator {
           if (level.positivo == null) {
             add('positivo', 'informe se o poço foi positivo.');
           }
-          if (level.fotoFinalizacao == null) {
+          if (level.fotoFinalizacao.isEmpty) {
             add('foto_finalizacao', 'a foto de finalização é obrigatória.');
           }
         }

@@ -107,24 +107,24 @@ class PocoTestePayloadMapper {
   /// 1-based level index. Used by the (future) binary upload step.
   static List<PocoTestePhoto> collectPhotos(PocoTesteFormState state) {
     final photos = <PocoTestePhoto>[];
-    void addIf(PocoTestePhoto? photo, {int? levelIndex}) {
-      if (photo != null) {
+    void addAll(List<PocoTestePhoto> items, {int? levelIndex}) {
+      for (final photo in items) {
         photos.add(
           levelIndex == null ? photo : photo.copyWith(levelIndex: levelIndex),
         );
       }
     }
 
-    addIf(state.surface.fotoSuperficie);
-    addIf(state.surface.fotoMaterial);
+    addAll(state.surface.fotoSuperficie);
+    addAll(state.surface.fotoMaterial);
     for (var i = 0; i < state.levels.length; i++) {
       final level = state.levels[i];
       final idx = i + 1;
-      addIf(level.fotoAberturaPt, levelIndex: idx);
-      addIf(level.fotoMaterial, levelIndex: idx);
-      addIf(level.fotoSolo, levelIndex: idx);
-      addIf(level.fotoPeneira, levelIndex: idx);
-      addIf(level.fotoFinalizacao, levelIndex: idx);
+      addAll(level.fotoAberturaPt, levelIndex: idx);
+      addAll(level.fotoMaterial, levelIndex: idx);
+      addAll(level.fotoSolo, levelIndex: idx);
+      addAll(level.fotoPeneira, levelIndex: idx);
+      addAll(level.fotoFinalizacao, levelIndex: idx);
     }
     return photos;
   }

@@ -5,11 +5,14 @@ import 'poco_teste_photo.dart';
 ///
 /// Visibility of conditional fields depends both on this level's data and on
 /// its 1-based position within the list, which is supplied by the caller.
+///
+/// Photo fields are lists so the user can attach more than one image (from the
+/// camera or the gallery) per field.
 class PocoTesteLevel {
   PocoTesteLevel({
     String? id,
     this.profundidadeInicial = '',
-    this.fotoAberturaPt,
+    this.fotoAberturaPt = const [],
     this.coloracao,
     this.outroColoracao = '',
     this.compactacao,
@@ -22,23 +25,23 @@ class PocoTesteLevel {
     this.outroHistorico = '',
     this.preColonial = const [],
     this.outroPreColonial = '',
-    this.fotoMaterial,
-    this.fotoSolo,
-    this.fotoPeneira,
+    this.fotoMaterial = const [],
+    this.fotoSolo = const [],
+    this.fotoPeneira = const [],
     this.profundidadeMaterial = '',
     this.justificativa,
     this.outroJustificativa = '',
     this.profundidade = '',
     this.obs = '',
     this.positivo,
-    this.fotoFinalizacao,
+    this.fotoFinalizacao = const [],
   }) : id = id ?? _newId();
 
   /// Stable local id so the UI can key cards and reconcile edits.
   final String id;
 
   final String profundidadeInicial;
-  final PocoTestePhoto? fotoAberturaPt;
+  final List<PocoTestePhoto> fotoAberturaPt;
   final String? coloracao;
   final String outroColoracao;
   final String? compactacao;
@@ -51,16 +54,16 @@ class PocoTesteLevel {
   final String outroHistorico;
   final List<String> preColonial;
   final String outroPreColonial;
-  final PocoTestePhoto? fotoMaterial;
-  final PocoTestePhoto? fotoSolo;
-  final PocoTestePhoto? fotoPeneira;
+  final List<PocoTestePhoto> fotoMaterial;
+  final List<PocoTestePhoto> fotoSolo;
+  final List<PocoTestePhoto> fotoPeneira;
   final String profundidadeMaterial;
   final String? justificativa;
   final String outroJustificativa;
   final String profundidade;
   final String obs;
   final String? positivo;
-  final PocoTestePhoto? fotoFinalizacao;
+  final List<PocoTestePhoto> fotoFinalizacao;
 
   static int _seq = 0;
   static String _newId() =>
@@ -99,8 +102,7 @@ class PocoTesteLevel {
 
   PocoTesteLevel copyWith({
     String? profundidadeInicial,
-    PocoTestePhoto? fotoAberturaPt,
-    bool clearFotoAberturaPt = false,
+    List<PocoTestePhoto>? fotoAberturaPt,
     String? coloracao,
     bool clearColoracao = false,
     String? outroColoracao,
@@ -114,12 +116,9 @@ class PocoTesteLevel {
     String? outroHistorico,
     List<String>? preColonial,
     String? outroPreColonial,
-    PocoTestePhoto? fotoMaterial,
-    bool clearFotoMaterial = false,
-    PocoTestePhoto? fotoSolo,
-    bool clearFotoSolo = false,
-    PocoTestePhoto? fotoPeneira,
-    bool clearFotoPeneira = false,
+    List<PocoTestePhoto>? fotoMaterial,
+    List<PocoTestePhoto>? fotoSolo,
+    List<PocoTestePhoto>? fotoPeneira,
     String? profundidadeMaterial,
     String? justificativa,
     bool clearJustificativa = false,
@@ -128,15 +127,12 @@ class PocoTesteLevel {
     String? obs,
     String? positivo,
     bool clearPositivo = false,
-    PocoTestePhoto? fotoFinalizacao,
-    bool clearFotoFinalizacao = false,
+    List<PocoTestePhoto>? fotoFinalizacao,
   }) {
     return PocoTesteLevel(
       id: id,
       profundidadeInicial: profundidadeInicial ?? this.profundidadeInicial,
-      fotoAberturaPt: clearFotoAberturaPt
-          ? null
-          : (fotoAberturaPt ?? this.fotoAberturaPt),
+      fotoAberturaPt: fotoAberturaPt ?? this.fotoAberturaPt,
       coloracao: clearColoracao ? null : (coloracao ?? this.coloracao),
       outroColoracao: outroColoracao ?? this.outroColoracao,
       compactacao: compactacao ?? this.compactacao,
@@ -150,11 +146,9 @@ class PocoTesteLevel {
       outroHistorico: outroHistorico ?? this.outroHistorico,
       preColonial: preColonial ?? this.preColonial,
       outroPreColonial: outroPreColonial ?? this.outroPreColonial,
-      fotoMaterial: clearFotoMaterial
-          ? null
-          : (fotoMaterial ?? this.fotoMaterial),
-      fotoSolo: clearFotoSolo ? null : (fotoSolo ?? this.fotoSolo),
-      fotoPeneira: clearFotoPeneira ? null : (fotoPeneira ?? this.fotoPeneira),
+      fotoMaterial: fotoMaterial ?? this.fotoMaterial,
+      fotoSolo: fotoSolo ?? this.fotoSolo,
+      fotoPeneira: fotoPeneira ?? this.fotoPeneira,
       profundidadeMaterial: profundidadeMaterial ?? this.profundidadeMaterial,
       justificativa: clearJustificativa
           ? null
@@ -163,9 +157,7 @@ class PocoTesteLevel {
       profundidade: profundidade ?? this.profundidade,
       obs: obs ?? this.obs,
       positivo: clearPositivo ? null : (positivo ?? this.positivo),
-      fotoFinalizacao: clearFotoFinalizacao
-          ? null
-          : (fotoFinalizacao ?? this.fotoFinalizacao),
+      fotoFinalizacao: fotoFinalizacao ?? this.fotoFinalizacao,
     );
   }
 
@@ -179,7 +171,7 @@ class PocoTesteLevel {
               profundidadeInicial.trim().isNotEmpty
           ? profundidadeInicial.trim()
           : null,
-      'foto_abertura_pt': fotoAberturaPt?.toJson(),
+      'foto_abertura_pt': _photosJson(fotoAberturaPt),
       'coloracao': coloracao,
       'outro_coloracao': showOutroColoracao
           ? _nullIfEmpty(outroColoracao)
@@ -200,9 +192,9 @@ class PocoTesteLevel {
       'outro_pre_colonial': hasMaterial && showOutroPreColonial
           ? _nullIfEmpty(outroPreColonial)
           : null,
-      'foto_material': hasMaterial ? fotoMaterial?.toJson() : null,
-      'foto_solo': fotoSolo?.toJson(),
-      'foto_peneira': fotoPeneira?.toJson(),
+      'foto_material': hasMaterial ? _photosJson(fotoMaterial) : <dynamic>[],
+      'foto_solo': _photosJson(fotoSolo),
+      'foto_peneira': _photosJson(fotoPeneira),
       'profundidade_material': hasMaterial
           ? _nullIfEmpty(profundidadeMaterial)
           : null,
@@ -213,14 +205,16 @@ class PocoTesteLevel {
       'profundidade': showProfundidadeFinal ? _nullIfEmpty(profundidade) : null,
       'obs': showObs ? _nullIfEmpty(obs) : null,
       'positivo': isFinalizacao ? positivo : null,
-      'foto_finalizacao': isFinalizacao ? fotoFinalizacao?.toJson() : null,
+      'foto_finalizacao': isFinalizacao
+          ? _photosJson(fotoFinalizacao)
+          : <dynamic>[],
     };
   }
 
   static PocoTesteLevel fromJson(Map<String, dynamic> json) {
     return PocoTesteLevel(
       profundidadeInicial: json['profundidade_inicial'] as String? ?? '',
-      fotoAberturaPt: PocoTestePhoto.fromJson(json['foto_abertura_pt']),
+      fotoAberturaPt: PocoTestePhoto.listFromJson(json['foto_abertura_pt']),
       coloracao: json['coloracao'] as String?,
       outroColoracao: json['outro_coloracao'] as String? ?? '',
       compactacao: json['compactacao'] as String?,
@@ -234,18 +228,21 @@ class PocoTesteLevel {
       outroHistorico: json['outro_historico'] as String? ?? '',
       preColonial: _stringList(json['pre_colonial']),
       outroPreColonial: json['outro_pre_colonial'] as String? ?? '',
-      fotoMaterial: PocoTestePhoto.fromJson(json['foto_material']),
-      fotoSolo: PocoTestePhoto.fromJson(json['foto_solo']),
-      fotoPeneira: PocoTestePhoto.fromJson(json['foto_peneira']),
+      fotoMaterial: PocoTestePhoto.listFromJson(json['foto_material']),
+      fotoSolo: PocoTestePhoto.listFromJson(json['foto_solo']),
+      fotoPeneira: PocoTestePhoto.listFromJson(json['foto_peneira']),
       profundidadeMaterial: json['profundidade_material'] as String? ?? '',
       justificativa: json['justificativa'] as String?,
       outroJustificativa: json['outro_justificativa'] as String? ?? '',
       profundidade: json['profundidade'] as String? ?? '',
       obs: json['obs'] as String? ?? '',
       positivo: json['positivo'] as String?,
-      fotoFinalizacao: PocoTestePhoto.fromJson(json['foto_finalizacao']),
+      fotoFinalizacao: PocoTestePhoto.listFromJson(json['foto_finalizacao']),
     );
   }
+
+  static List<Map<String, dynamic>> _photosJson(List<PocoTestePhoto> photos) =>
+      photos.map((photo) => photo.toJson()).toList();
 
   static List<String> _stringList(Object? raw) {
     if (raw is List) return raw.map((e) => e.toString()).toList();

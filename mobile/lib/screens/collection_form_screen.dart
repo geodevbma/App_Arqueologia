@@ -9,9 +9,10 @@ import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 
-import '../app/theme.dart';
 import '../core/access.dart';
 import '../core/providers.dart';
+import '../core/sync_service.dart';
+import '../core/watermark_service.dart';
 import '../widgets/app_widgets.dart';
 
 class CollectionFormScreen extends ConsumerStatefulWidget {
@@ -332,8 +333,37 @@ class _CollectionFormScreenState extends ConsumerState<CollectionFormScreen> {
   }
 
   Future<String?> _pickPhoto() async {
-    final image = await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 74, maxWidth: 1600);
-    return image?.path;
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt_rounded),
+              title: const Text('Camera'),
+              onTap: () => Navigator.pop(context, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_rounded),
+              title: const Text('Galeria'),
+              onTap: () => Navigator.pop(context, ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return null;
+    final image = await ImagePicker().pickImage(source: source, imageQuality: 74, maxWidth: 1600);
+    if (image == null) return null;
+    await const WatermarkService().apply(
+      image.path,
+      latitude: latitude,
+      longitude: longitude,
+      accuracy: accuracy,
+      capturedAt: DateTime.now(),
+    );
+    return image.path;
   }
 
   String? _validate() {
@@ -377,6 +407,10 @@ class _CollectionFormScreenState extends ConsumerState<CollectionFormScreen> {
         case 'date':
         case 'datetime':
           if (_values[key] == null) return 'Informe a data: $label.';
+          break;
+        case 'boolean':
+          // Sempre preenchido: tanto "Sim" (true) quanto "Nao" (false) sao
+          // respostas validas para um campo booleano.
           break;
         default:
           if ((_text[key]?.text.trim() ?? '').isEmpty) return 'Preencha: $label.';
@@ -489,6 +523,8 @@ class _CollectionFormScreenState extends ConsumerState<CollectionFormScreen> {
       'photos': photos,
     };
     await ref.read(storeProvider).saveCollection(payload);
+    // Tenta sincronizar imediatamente (best-effort) se houver internet.
+    unawaited(ref.read(syncServiceProvider).trigger());
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(editing ? 'Coleta atualizada na caixa de saida.' : 'Coleta salva na caixa de saida.')));
     context.go('/home');
@@ -679,6 +715,7 @@ class _CollectionFormScreenState extends ConsumerState<CollectionFormScreen> {
               if (selectedDate == null) return;
               var result = selectedDate;
               if (type == 'datetime') {
+                if (!mounted) return;
                 final time = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(value ?? DateTime.now()));
                 if (time != null) {
                   result = DateTime(selectedDate.year, selectedDate.month, selectedDate.day, time.hour, time.minute);
