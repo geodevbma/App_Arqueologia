@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
+import 'forms_screen.dart';
 import 'history_screen.dart';
 import 'outbox_screen.dart';
-import 'projects_screen.dart';
 import 'settings_screen.dart';
 
 class HomeShell extends StatefulWidget {
@@ -18,7 +18,7 @@ class _HomeShellState extends State<HomeShell> {
   @override
   Widget build(BuildContext context) {
     final pages = [
-      const ProjectsScreen(),
+      const FormsScreen(),
       const OutboxScreen(),
       const HistoryScreen(),
       const SettingsScreen(),
@@ -30,9 +30,9 @@ class _HomeShellState extends State<HomeShell> {
         onDestinationSelected: (value) => setState(() => index = value),
         destinations: const [
           NavigationDestination(
-            icon: Icon(Icons.work_outline_rounded),
-            selectedIcon: Icon(Icons.work_rounded),
-            label: 'Projetos',
+            icon: Icon(Icons.dynamic_form_outlined),
+            selectedIcon: Icon(Icons.dynamic_form_rounded),
+            label: 'Formularios',
           ),
           NavigationDestination(
             icon: Icon(Icons.outbox_outlined),

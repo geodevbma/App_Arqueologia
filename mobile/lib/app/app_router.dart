@@ -2,6 +2,7 @@ import 'package:go_router/go_router.dart';
 
 import '../screens/collection_detail_screen.dart';
 import '../screens/collection_form_screen.dart';
+import '../screens/form_projects_screen.dart';
 import '../screens/home_shell.dart';
 import '../screens/initial_sync_screen.dart';
 import '../screens/login_screen.dart';
@@ -41,6 +42,11 @@ GoRouter createAppRouter() {
         path: '/forms',
         builder: (context, state) =>
             ProjectFormsScreen(project: state.extra! as Map<String, dynamic>),
+      ),
+      GoRoute(
+        path: '/form-projects',
+        builder: (context, state) =>
+            FormProjectsScreen(form: state.extra! as Map<String, dynamic>),
       ),
       GoRoute(
         path: '/collect',
