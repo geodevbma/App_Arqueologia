@@ -22,6 +22,7 @@ PROJECT_NAME = "Projeto de Acompanhamento Arqueologico Ramal Turistico Ouro Pret
 FORM_NAME = "Formulario de Acompanhamento Arqueologico"
 POCO_TESTE_FORM_NAME = "Poço teste"
 ESTRUTURA_FORM_NAME = "Estrutura Historica"
+ANALISE_PAISAGEM_FORM_NAME = "Análise de paisagem"
 
 SECTIONS = {
     "Trecho 01": ["000+800", "001+850", "002+300", "003+925", "006+800"],
@@ -292,6 +293,243 @@ ESTRUTURA_FIELDS = [
 ]
 
 
+# Modelo "Análise de paisagem" (origem: XLSForm Survey123 "Análise de paisagem.xlsx").
+# Mapeamento dos tipos do Survey123 para o motor de formulario dinamico do sistema:
+#   geopoint -> coordinate | text -> text/textarea | select_one -> select |
+#   select_multiple -> multiselect | image (multiline) -> photo {multiple: True} |
+#   dateTime now() -> datetime {auto: "now"} | "responsavel" -> auto_user.
+# Obrigatoriedade fiel a planilha: apenas localizacao, responsavel e dta_hora sao
+# marcados como required no Survey123. As relevancias (relevant) viram conditional_logic.
+PAISAGEM_ESTADO_CHOICES = [
+    {"value": "Acre", "label": "Acre"},
+    {"value": "Alagoas", "label": "Alagoas"},
+    {"value": "Amapá", "label": "Amapá"},
+    {"value": "Amazonas", "label": "Amazonas"},
+    {"value": "Bahia", "label": "Bahia"},
+    {"value": "Ceará", "label": "Ceará"},
+    {"value": "Espírito Santo", "label": "Espírito Santo"},
+    {"value": "Goiás", "label": "Goiás"},
+    {"value": "Maranhão", "label": "Maranhão"},
+    {"value": "Mato Grosso", "label": "Mato Grosso"},
+    {"value": "Mato Grosso do Sul", "label": "Mato Grosso do Sul"},
+    {"value": "Minas Gerais", "label": "Minas Gerais"},
+    {"value": "Pará", "label": "Pará"},
+    {"value": "Paraíba", "label": "Paraíba"},
+    {"value": "Paraná", "label": "Paraná"},
+    {"value": "Pernambuco", "label": "Pernambuco"},
+    {"value": "Piauí", "label": "Piauí"},
+    {"value": "Rio de Janeiro", "label": "Rio de Janeiro"},
+    {"value": "Rio Grande do Norte", "label": "Rio Grande do Norte"},
+    {"value": "Rio Grande do Sul", "label": "Rio Grande do Sul"},
+    {"value": "Rondônia", "label": "Rondônia"},
+    {"value": "Roraima", "label": "Roraima"},
+    {"value": "Santa Catarina", "label": "Santa Catarina"},
+    {"value": "São Paulo", "label": "São Paulo"},
+    {"value": "Sergipe", "label": "Sergipe"},
+    {"value": "Tocantins", "label": "Tocantins"},
+]
+
+PAISAGEM_VESTIGIO_CHOICES = [
+    {"value": "presenca", "label": "Presença"},
+    {"value": "ausencia", "label": "Ausência"},
+]
+
+PAISAGEM_POTENCIAL_CHOICES = [
+    {"value": "azidas", "label": "Jazidas líticas (seixos, cristais, blocos)"},
+    {"value": "argila", "label": "Argila"},
+    {"value": "relevo_suave", "label": "Relevo suave"},
+    {"value": "compartimento_da_paisagem", "label": "Compartimento da paisagem"},
+    {"value": "curso_de_agua", "label": "Proximidade de curso de água"},
+    {"value": "afloramento", "label": "Presença de afloramento rochoso com abrigo ou gruta"},
+]
+
+PAISAGEM_CONTEXTO_HISTORICO_CHOICES = [
+    {"value": "pomar", "label": "Pomar"},
+    {"value": "pitaia", "label": "Pitaia, espada de São Jorge, etc."},
+    {"value": "clareira", "label": "Clareira"},
+    {"value": "sedimento", "label": "Sedimento revolvido"},
+    {"value": "setor", "label": "Setor escavado"},
+]
+
+ANALISE_PAISAGEM_FIELDS = [
+    {
+        # O projeto e selecionado na tela anterior do app (form_projects_screen),
+        # que ja lista apenas os projetos vinculados ao usuario. Com source=projects
+        # o campo nao e re-renderizado no formulario e o project_id vem do fluxo.
+        "label": "Projeto",
+        "field_key": "project_id",
+        "field_type": "select",
+        "is_required": True,
+        "order_index": 1,
+        "options": {"source": "projects"},
+    },
+    {
+        "label": "Localização",
+        "field_key": "localizacao",
+        "field_type": "coordinate",
+        "is_required": True,
+        "order_index": 2,
+    },
+    {"label": "Ponto de controle", "field_key": "ponto", "field_type": "text", "is_required": False, "order_index": 3},
+    {"label": "Número da Ficha", "field_key": "n_ficha", "field_type": "text", "is_required": False, "order_index": 4},
+    {
+        "label": "Estado",
+        "field_key": "estado",
+        "field_type": "select",
+        "is_required": False,
+        "order_index": 5,
+        "options": {"choices": PAISAGEM_ESTADO_CHOICES},
+    },
+    {"label": "Município", "field_key": "municipio", "field_type": "text", "is_required": False, "order_index": 6},
+    {"label": "DESCRIÇÃO DA ÁREA", "field_key": "descricao_area", "field_type": "note", "is_required": False, "order_index": 7},
+    {
+        "label": "Uso e ocupação do solo (utilização atual do terreno)",
+        "field_key": "solo",
+        "field_type": "textarea",
+        "is_required": False,
+        "order_index": 8,
+    },
+    {
+        "label": "Aspectos geológicos (tipo de rocha, presença/ausência de afloramentos, blocos, seixos, tamanho)",
+        "field_key": "aspectos_geologicos",
+        "field_type": "textarea",
+        "is_required": False,
+        "order_index": 9,
+    },
+    {
+        "label": "Aspectos do relevo (Unidades do Relevo: serra, planalto, planície / Compartimento: topo, alta, média, baixa vertente, vale)",
+        "field_key": "aspectos_relevo",
+        "field_type": "textarea",
+        "is_required": False,
+        "order_index": 10,
+    },
+    {
+        "label": "Aspectos Hidrográficos (presença/ausência de curso de água, porte, distância relativa)",
+        "field_key": "aspectos_hidrograficos",
+        "field_type": "textarea",
+        "is_required": False,
+        "order_index": 11,
+    },
+    {
+        "label": "Aspectos Vegetacionais (tipo, porte, secundária, primária, densa, esparsa)",
+        "field_key": "aspectos_vegetacionais",
+        "field_type": "textarea",
+        "is_required": False,
+        "order_index": 12,
+    },
+    {
+        "label": "Vestígios arqueológicos",
+        "field_key": "vestigio_arqueologico",
+        "field_type": "select",
+        "is_required": False,
+        "order_index": 13,
+        "options": {"choices": PAISAGEM_VESTIGIO_CHOICES},
+    },
+    {
+        "label": "Presença de vestígios arqueológicos? Descreva-os.",
+        "field_key": "presenca",
+        "field_type": "textarea",
+        "is_required": False,
+        "order_index": 14,
+        "conditional_logic": {"field": "vestigio_arqueologico", "operator": "equals", "value": "presenca"},
+    },
+    {
+        "label": "Ausência de vestígios arqueológicos? Descreva-os.",
+        "field_key": "ausencia",
+        "field_type": "textarea",
+        "is_required": False,
+        "order_index": 15,
+        "conditional_logic": {"field": "vestigio_arqueologico", "operator": "equals", "value": "ausencia"},
+    },
+    {
+        "label": "Qual o potencial arqueológico para o contexto Pré-Colonial? Descreva.",
+        "field_key": "potencial_arqueologico",
+        "field_type": "multiselect",
+        "is_required": False,
+        "order_index": 16,
+        "options": {"choices": PAISAGEM_POTENCIAL_CHOICES},
+    },
+    {
+        "label": "Descrição (critérios para classificar em alto, médio e baixo potencial Pré-Colonial)",
+        "field_key": "descricao_alto_nivel",
+        "field_type": "textarea",
+        "is_required": False,
+        "order_index": 17,
+    },
+    {
+        "label": "Qual o potencial arqueológico para o contexto Histórico?",
+        "field_key": "contexto_historico",
+        "field_type": "multiselect",
+        "is_required": False,
+        "order_index": 18,
+        "options": {"choices": PAISAGEM_CONTEXTO_HISTORICO_CHOICES},
+    },
+    {
+        "label": "Descrição (critérios para classificar em alto, médio e baixo potencial Histórico)",
+        "field_key": "descricao_medio_nivel",
+        "field_type": "textarea",
+        "is_required": False,
+        "order_index": 19,
+    },
+    {
+        "label": "Foto porção norte",
+        "field_key": "porcao_norte",
+        "field_type": "photo",
+        "is_required": False,
+        "order_index": 20,
+        "options": {"multiple": True},
+    },
+    {
+        "label": "Foto porção sul",
+        "field_key": "porcao_sul",
+        "field_type": "photo",
+        "is_required": False,
+        "order_index": 21,
+        "options": {"multiple": True},
+    },
+    {
+        "label": "Foto porção leste",
+        "field_key": "porcao_leste",
+        "field_type": "photo",
+        "is_required": False,
+        "order_index": 22,
+        "options": {"multiple": True},
+    },
+    {
+        "label": "Foto porção oeste",
+        "field_key": "porcao_oeste",
+        "field_type": "photo",
+        "is_required": False,
+        "order_index": 23,
+        "options": {"multiple": True},
+    },
+    {
+        "label": "Foto superfície",
+        "field_key": "superficie",
+        "field_type": "photo",
+        "is_required": False,
+        "order_index": 24,
+        "options": {"multiple": True},
+    },
+    {"label": "Observações extras", "field_key": "obs_extras", "field_type": "textarea", "is_required": False, "order_index": 25},
+    {
+        "label": "Arqueólogo(a)",
+        "field_key": "responsavel",
+        "field_type": "auto_user",
+        "is_required": True,
+        "order_index": 26,
+    },
+    {
+        "label": "Data",
+        "field_key": "dta_hora",
+        "field_type": "datetime",
+        "is_required": True,
+        "order_index": 27,
+        "options": {"auto": "now"},
+    },
+]
+
+
 def _seed_form(db: Session, project: Project, name: str, description: str, fields: list[dict]) -> Form:
     form = db.query(Form).filter_by(name=name).first()
     if not form:
@@ -392,6 +630,13 @@ def seed_initial_data(db: Session) -> None:
             ESTRUTURA_FORM_NAME,
             "Ficha de registro de estruturas historicas (catas, galerias, muros, etc.).",
             ESTRUTURA_FIELDS,
+        ),
+        _seed_form(
+            db,
+            project,
+            ANALISE_PAISAGEM_FORM_NAME,
+            "Ficha de analise de paisagem (caracterizacao ambiental e potencial arqueologico).",
+            ANALISE_PAISAGEM_FIELDS,
         ),
     ]
 
